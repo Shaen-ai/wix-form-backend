@@ -7,6 +7,7 @@ use App\Mail\NotificationMail;
 use App\Models\Form;
 use App\Models\FormSettings;
 use App\Models\Submission;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 
 class MailService
@@ -21,6 +22,10 @@ class MailService
             : $settings?->notification_email;
 
         if (empty($email) || ! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            Log::info('Admin notification skipped: no valid admin email configured', [
+                'form_id' => $form->id,
+                'submission_id' => $submission->id,
+            ]);
             return;
         }
 
@@ -42,8 +47,18 @@ class MailService
 
         $email = $this->extractSubmitterEmail($submission, $form);
         if (empty($email) || ! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            Log::info('Auto-reply skipped: no valid submitter email in form data', [
+                'form_id' => $form->id,
+                'submission_id' => $submission->id,
+            ]);
             return;
         }
+
+        // Ensure we have a FormSettings instance (AutoReplyMail requires it for subject/body)
+        $settings = $settings ?? FormSettings::firstOrCreate(
+            ['form_id' => $form->id],
+            ['auto_reply_enabled' => false]
+        );
 
         Mail::to($email)->send(new AutoReplyMail($submission, $form, $settings));
     }
@@ -55,8 +70,14 @@ class MailService
 
         foreach ($data as $fieldId => $value) {
             $field = $fields->get($fieldId);
-            if ($field && $field->type === 'email' && is_string($value)) {
-                return $value;
+            if (! $field || $field->type !== 'email') {
+                continue;
+            }
+            $email = is_array($value)
+                ? ($value['value'] ?? ($value['email'] ?? null))
+                : (is_string($value) ? $value : null);
+            if ($email && is_string($email) && filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                return $email;
             }
         }
 

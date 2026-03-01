@@ -337,8 +337,14 @@ class SubmitController extends Controller
     {
         foreach ($data as $fieldId => $value) {
             $field = $fields->get($fieldId);
-            if ($field && $field->type === 'email' && is_string($value)) {
-                return [(int) $fieldId, $value];
+            if (! $field || $field->type !== 'email') {
+                continue;
+            }
+            $email = is_array($value)
+                ? ($value['value'] ?? ($value['email'] ?? null))
+                : (is_string($value) ? $value : null);
+            if ($email && is_string($email) && filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                return [(int) $fieldId, $email];
             }
         }
 
