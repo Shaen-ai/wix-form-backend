@@ -26,6 +26,8 @@ Route::prefix('v1')->group(function () {
             ->middleware('throttle:5,1');
         Route::post('/forms/{id}/ai-edit', [FormFieldController::class, 'editWithAi'])
             ->middleware('throttle:5,1');
+        Route::post('/forms/{id}/translate', [FormFieldController::class, 'translate'])
+            ->middleware('throttle:5,1');
         Route::put('/forms/{id}/fields', [FormFieldController::class, 'update']);
         Route::get('/forms/{id}/submissions', [SubmissionController::class, 'index']);
         Route::get('/forms/{id}/submissions/export.csv', [SubmissionController::class, 'exportCsv']);

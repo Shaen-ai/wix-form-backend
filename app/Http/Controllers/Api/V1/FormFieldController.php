@@ -85,6 +85,14 @@ Apply the requested changes and return a JSON object with two keys:
 
 If the instruction only affects form settings, return "fields" unchanged.
 If the instruction only affects fields, return "form" as an empty object {}.
+
+TRANSLATION: If the user asks to translate the form (e.g. "translate to Spanish", "translate to French"), translate ALL user-facing text:
+- form name, description
+- every field's label, placeholder, help_text
+- options_json.choices arrays (translate each choice string)
+- options_json.placeholders objects (translate each value)
+- settings_json.buttonText, settings_json.successMessage
+Set form.language to the target language code (e.g. "es", "fr", "de").
 Return ONLY the JSON object with "form" and "fields" keys. No explanation, no markdown.
 PROMPT;
 
@@ -180,6 +188,7 @@ PROMPT;
             'fields' => $existingFields->map(fn ($f) => [
                 'type' => $f->type,
                 'label' => $f->label,
+                'help_text' => $f->help_text,
                 'required' => $f->required,
                 'placeholder' => $f->placeholder,
                 'options_json' => $f->options_json,
@@ -259,6 +268,121 @@ PROMPT;
         }
     }
 
+    private const LANGUAGE_LABELS = [
+        'en' => 'English', 'es' => 'Spanish', 'fr' => 'French', 'de' => 'German',
+        'pt' => 'Portuguese', 'it' => 'Italian', 'nl' => 'Dutch', 'ru' => 'Russian',
+        'zh' => 'Chinese', 'ja' => 'Japanese', 'ko' => 'Korean', 'ar' => 'Arabic',
+        'he' => 'Hebrew', 'hi' => 'Hindi', 'tr' => 'Turkish', 'pl' => 'Polish',
+        'sv' => 'Swedish', 'da' => 'Danish', 'fi' => 'Finnish', 'no' => 'Norwegian',
+    ];
+
+    public function translate(Request $request, int $id): JsonResponse
+    {
+        $instanceId = $request->attributes->get('instanceId');
+        $form = $this->resolveForm($instanceId, $id);
+
+        $request->validate([
+            'language' => 'required|string|size:2',
+        ]);
+
+        $code = $request->input('language');
+        $label = self::LANGUAGE_LABELS[$code] ?? $code;
+
+        $apiKey = config('services.openai.key');
+        if (empty($apiKey)) {
+            Log::error('OpenAI API key not configured');
+            return response()->json(['error' => 'AI service not configured'], 503);
+        }
+
+        $existingFields = $form->formFields()->orderBy('order_index')->get();
+
+        $currentState = json_encode([
+            'name' => $form->name,
+            'description' => $form->description,
+            'language' => $form->language,
+            'settings_json' => $form->settings_json ?? (object) [],
+            'fields' => $existingFields->map(fn ($f) => [
+                'type' => $f->type,
+                'label' => $f->label,
+                'help_text' => $f->help_text,
+                'placeholder' => $f->placeholder,
+                'options_json' => $f->options_json,
+                'order_index' => $f->order_index,
+            ])->values(),
+        ]);
+
+        $userMessage = "Current form state:\n{$currentState}\n\nEdit instruction: Translate the entire form to {$label}. Translate all user-facing text: form name, description, every field's label, placeholder, help_text, options_json.choices arrays, options_json.placeholders objects, settings_json.buttonText, settings_json.successMessage. Set form.language to '{$code}'.";
+
+        try {
+            $response = Http::withHeaders([
+                'Authorization' => 'Bearer ' . $apiKey,
+            ])->timeout(30)->post('https://api.openai.com/v1/chat/completions', [
+                'model' => config('services.openai.model', 'gpt-4o-mini'),
+                'messages' => [
+                    ['role' => 'system', 'content' => $this->getSystemPrompt(self::AI_EDIT_SYSTEM_PROMPT)],
+                    ['role' => 'user', 'content' => $userMessage],
+                ],
+                'temperature' => 0.3,
+                'max_tokens' => 3000,
+                'response_format' => ['type' => 'json_object'],
+            ]);
+
+            if ($response->failed()) {
+                Log::warning('OpenAI API call failed (translate)', ['status' => $response->status()]);
+                return response()->json(['error' => 'AI service unavailable'], 502);
+            }
+
+            $content = $response->json('choices.0.message.content');
+            $parsed = json_decode($content, true);
+
+            if (!$parsed || !is_array($parsed)) {
+                return response()->json(['error' => 'Failed to parse AI response'], 502);
+            }
+
+            $formUpdates = $parsed['form'] ?? [];
+            $rawFields = $parsed['fields'] ?? [];
+
+            if (!empty($formUpdates) && is_array($formUpdates)) {
+                $allowed = ['name', 'description', 'language', 'status', 'is_active'];
+                $formData = array_intersect_key($formUpdates, array_flip($allowed));
+
+                if (isset($formUpdates['settings_json']) && is_array($formUpdates['settings_json'])) {
+                    $formData['settings_json'] = array_merge(
+                        $form->settings_json ?? [],
+                        $formUpdates['settings_json']
+                    );
+                }
+
+                if (!empty($formData)) {
+                    $form->update($formData);
+                }
+            }
+
+            $sanitizedFields = [];
+            if (!empty($rawFields) && is_array($rawFields)) {
+                $sanitizedFields = $this->sanitizeAiFields($rawFields);
+
+                DB::transaction(function () use ($form, $sanitizedFields) {
+                    $form->formFields()->delete();
+                    foreach ($sanitizedFields as $i => $fd) {
+                        $form->formFields()->create(array_merge($fd, ['order_index' => $i]));
+                    }
+                });
+            }
+
+            $form->refresh();
+            $updatedFields = $form->formFields()->orderBy('order_index')->get();
+
+            return response()->json([
+                'form' => $form,
+                'fields' => $updatedFields,
+            ]);
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            Log::warning('OpenAI API timeout (translate)', ['message' => $e->getMessage()]);
+            return response()->json(['error' => 'AI service timed out. Please try again.'], 504);
+        }
+    }
+
     private function resolveForm(?string $instanceId, int $id): Form
     {
         $form = Form::where(function ($q) use ($instanceId) {
@@ -293,6 +417,9 @@ PROMPT;
             $sanitized[] = [
                 'type' => $type,
                 'label' => mb_substr((string) ($f['label'] ?? 'Field ' . ($i + 1)), 0, 255),
+                'help_text' => isset($f['help_text']) && $f['help_text'] !== null
+                    ? mb_substr((string) $f['help_text'], 0, 500)
+                    : null,
                 'required' => (bool) ($f['required'] ?? false),
                 'placeholder' => isset($f['placeholder']) && $f['placeholder'] !== null
                     ? mb_substr((string) $f['placeholder'], 0, 255)
