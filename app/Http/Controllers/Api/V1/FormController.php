@@ -13,33 +13,6 @@ use Illuminate\Support\Facades\Log;
 
 class FormController extends Controller
 {
-    public function ensure(Request $request): JsonResponse
-    {
-        $tenant = $request->attributes->get('tenant');
-        $widgetInstanceId = $request->input('widgetInstanceId');
-        if (empty($widgetInstanceId)) {
-            return response()->json(['message' => 'widgetInstanceId required'], 422);
-        }
-
-        $form = Form::firstOrCreate(
-            [
-                'tenant_id' => $tenant->id,
-                'widget_instance_id' => $widgetInstanceId,
-            ],
-            [
-                'name' => 'Contact Form',
-                'description' => '',
-                'is_active' => true,
-            ]
-        );
-
-        if ($form->wasRecentlyCreated && $form->formFields()->count() === 0) {
-            $this->seedDefaultFields($form);
-        }
-
-        return response()->json($form);
-    }
-
     /**
      * GET /forms — works with OR without auth.
      *

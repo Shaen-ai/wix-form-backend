@@ -23,7 +23,6 @@ Route::prefix('v1')->group(function () {
         Route::get('/tenant/settings', [TenantSettingsController::class, 'show']);
         Route::put('/tenant/settings', [TenantSettingsController::class, 'update']);
 
-        Route::post('/forms/ensure', [FormController::class, 'ensure']);
         Route::put('/forms/{id}', [FormController::class, 'update']);
         Route::get('/forms/{id}/fields', [FormFieldController::class, 'index']);
         Route::post('/forms/{id}/generate-fields', [FormFieldController::class, 'generate'])
