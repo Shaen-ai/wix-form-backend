@@ -4,8 +4,12 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\Form;
+use App\Models\Tenant;
+use Firebase\JWT\JWT;
+use Firebase\JWT\Key;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class FormController extends Controller
 {
@@ -36,11 +40,23 @@ class FormController extends Controller
         return response()->json($form);
     }
 
+    /**
+     * GET /forms — works with OR without auth.
+     *
+     * Authenticated (settings panel / widget with token):
+     *   tenant-scoped, creates form via firstOrCreate if widgetInstanceId given.
+     *
+     * Unauthenticated (widget in editor):
+     *   read-only lookup by widgetInstanceId; requires X-Wix-Comp-Id header.
+     */
     public function index(Request $request): JsonResponse
     {
-        $tenant = $request->attributes->get('tenant');
+        $tenant = $request->attributes->get('tenant')
+            ?? $this->resolveTenantFromAuth($request);
 
-        if ($widgetInstanceId = $request->query('widgetInstanceId')) {
+        $widgetInstanceId = $request->query('widgetInstanceId');
+
+        if ($tenant && $widgetInstanceId) {
             $form = Form::firstOrCreate(
                 [
                     'tenant_id' => $tenant->id,
@@ -58,15 +74,84 @@ class FormController extends Controller
             }
 
             $form->load('formFields');
+            $form->setAttribute('plan', $tenant->plan ?? 'free');
 
             return response()->json(['data' => [$form]]);
         }
 
-        $forms = Form::where('tenant_id', $tenant->id)
-            ->orderBy('created_at', 'desc')
-            ->get();
+        if ($tenant) {
+            $forms = Form::where('tenant_id', $tenant->id)
+                ->orderBy('created_at', 'desc')
+                ->get();
 
-        return response()->json(['data' => $forms]);
+            return response()->json(['data' => $forms]);
+        }
+
+        // No auth — allow read-only lookup with X-Wix-Comp-Id
+        $compId = $request->header('X-Wix-Comp-Id');
+
+        if (! $widgetInstanceId || ! $compId) {
+            return response()->json(['message' => 'Unauthorized'], 401);
+        }
+
+        $form = Form::where('widget_instance_id', $widgetInstanceId)
+            ->where('is_active', true)
+            ->with('formFields')
+            ->first();
+
+        if (! $form) {
+            return response()->json(['data' => []]);
+        }
+
+        $form->setAttribute('plan', $form->tenant?->plan ?? 'free');
+
+        return response()->json(['data' => [$form]]);
+    }
+
+    /**
+     * Try to resolve tenant from Authorization header inline (so the route
+     * can live outside the WixInstanceAuth middleware while still supporting
+     * authenticated callers like the settings panel).
+     */
+    private function resolveTenantFromAuth(Request $request): ?Tenant
+    {
+        $auth = $request->header('Authorization');
+        if (! $auth || ! str_starts_with($auth, 'Bearer ')) {
+            return null;
+        }
+
+        $token = substr($auth, 7);
+
+        try {
+            $key = config('app.jwt_secret');
+
+            if (empty($key)) {
+                if (app()->environment('production')) {
+                    return null;
+                }
+                $parts = explode('.', $token);
+                $payload = isset($parts[1])
+                    ? (json_decode(base64_decode(strtr($parts[1], '-_', '+/')), true) ?? [])
+                    : [];
+            } else {
+                $payload = (array) JWT::decode($token, new Key($key, 'HS256'));
+            }
+        } catch (\Throwable $e) {
+            Log::debug('[FormController] Inline JWT decode failed', ['error' => $e->getMessage()]);
+            return null;
+        }
+
+        $wixSiteId = $payload['wixSiteId'] ?? $payload['siteId'] ?? null;
+        $wixInstanceId = $payload['wixInstanceId'] ?? $payload['instanceId'] ?? null;
+
+        if (! $wixSiteId) {
+            return null;
+        }
+
+        return Tenant::updateOrCreate(
+            ['wix_site_id' => $wixSiteId],
+            ['plan' => app()->environment('local') ? 'premium' : 'free', 'wix_instance_id' => $wixInstanceId]
+        );
     }
 
     public function update(Request $request, int $id): JsonResponse
