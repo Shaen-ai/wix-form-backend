@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Services\WixTokenInfoService;
 use App\Support\AuthHelper;
 use Closure;
 use Firebase\JWT\JWT;
@@ -31,17 +32,37 @@ class WixInstanceAuth
             return response()->json(['message' => 'Unauthorized'], 401);
         }
 
-        $key = config('app.jwt_secret');
+        // Primary: Wix Token Info API (Wix recommended approach)
+        $tokenInfo = app(WixTokenInfoService::class)->getTokenInfo($token);
+        if ($tokenInfo) {
+            Log::debug('[WixInstanceAuth] Verified via Wix Token Info API');
+            $request->attributes->set('instanceId', $tokenInfo['instanceId']);
+            $request->attributes->set('wixSiteId', $tokenInfo['wixSiteId']);
 
+            return $next($request);
+        }
+
+        // Fallback: local decode strategies (for offline/legacy tokens)
+        $key = config('app.jwt_secret');
         $payload = $this->decodeToken($token, $key);
 
         if ($payload === null) {
-            Log::error('[WixInstanceAuth] All token decode strategies failed', [
-                'method'       => $request->method(),
-                'url'          => $request->fullUrl(),
-                'token_parts'  => count(explode('.', $token)),
-                'token_len'    => strlen($token),
-            ]);
+            $parts = explode('.', $token);
+            $errorContext = [
+                'method'      => $request->method(),
+                'url'         => $request->fullUrl(),
+                'token_parts' => count($parts),
+                'token_len'   => strlen($token),
+            ];
+            // Try to decode any part as JSON to help diagnose Wix token format
+            foreach ($parts as $i => $part) {
+                $decoded = $this->decodeBase64Json($part);
+                if (is_array($decoded)) {
+                    $errorContext["part_{$i}_keys"] = array_keys($decoded);
+                    $errorContext["part_{$i}_instanceId"] = $this->extractInstanceId($decoded);
+                }
+            }
+            Log::error('[WixInstanceAuth] All token decode strategies failed', $errorContext);
             return response()->json(['message' => 'Invalid token'], 401);
         }
 
@@ -159,14 +180,14 @@ class WixInstanceAuth
         [$sig, $data] = $parts;
 
         $expectedSig = hash_hmac('sha256', $data, $key, true);
-        $actualSig   = base64_decode(strtr($sig, '-_', '+/'));
+        $actualSig   = $this->base64UrlDecode($sig);
 
-        if (! hash_equals($expectedSig, $actualSig)) {
+        if ($actualSig === null || ! hash_equals($expectedSig, $actualSig)) {
             Log::debug('[WixInstanceAuth] Wix instance token HMAC mismatch');
             return null;
         }
 
-        $payload = json_decode(base64_decode(strtr($data, '-_', '+/')), true);
+        $payload = $this->decodeBase64Json($data);
 
         if (! is_array($payload)) {
             return null;
@@ -181,6 +202,7 @@ class WixInstanceAuth
      * Strategy 3: decode the JWT payload without signature verification.
      * This covers tokens signed by Wix's OAuth servers (RS256) that we
      * cannot verify locally but still carry a valid instanceId claim.
+     * For multi-part tokens (e.g. 5-part), tries each middle segment as payload.
      */
     private function tryDecodePayloadWithoutVerification(string $token): ?array
     {
@@ -190,24 +212,49 @@ class WixInstanceAuth
             return null;
         }
 
-        $payload = json_decode(
-            base64_decode(strtr($parts[1], '-_', '+/')),
-            true,
-        );
-
-        if (! is_array($payload)) {
-            return null;
-        }
-
-        if (! $this->extractInstanceId($payload)) {
-            Log::debug('[WixInstanceAuth] Unverified payload has no recognised instance ID', [
-                'keys'    => array_keys($payload),
-                'payload' => $payload,
+        // JWT payload is typically at index 1; for non-standard formats try all parts
+        $indicesToTry = count($parts) === 3 ? [1] : range(1, min(4, count($parts) - 1));
+        foreach ($indicesToTry as $idx) {
+            if (! isset($parts[$idx])) {
+                continue;
+            }
+            $payload = $this->decodeBase64Json($parts[$idx]);
+            if (! is_array($payload)) {
+                continue;
+            }
+            $instanceId = $this->extractInstanceId($payload);
+            if ($instanceId) {
+                return $payload;
+            }
+            Log::debug('[WixInstanceAuth] Part ' . $idx . ' decoded but no instance ID', [
+                'keys' => array_keys($payload),
             ]);
-            return null;
         }
 
-        return $payload;
+        return null;
+    }
+
+    private function base64UrlDecode(string $b64): ?string
+    {
+        $b64 = strtr($b64, '-_', '+/');
+        $pad = strlen($b64) % 4;
+        if ($pad) {
+            $b64 .= str_repeat('=', 4 - $pad);
+        }
+        $decoded = base64_decode($b64, true);
+
+        return $decoded !== false ? $decoded : null;
+    }
+
+    private function decodeBase64Json(string $b64): ?array
+    {
+        $decoded = $this->base64UrlDecode($b64);
+        if ($decoded === null) {
+            return null;
+        }
+        $json = json_decode($decoded, true);
+
+        return is_array($json) ? $json : null;
     }
 
     /**
@@ -216,13 +263,16 @@ class WixInstanceAuth
      */
     private function extractInstanceId(array $payload): ?string
     {
-        $id = $payload['instanceId']
-            ?? $payload['wixInstanceId']
-            ?? $payload['instance_id']
-            ?? null;
-
-        if ($id) {
-            return (string) $id;
+        $candidates = [
+            $payload['instanceId'] ?? null,
+            $payload['wixInstanceId'] ?? null,
+            $payload['instance_id'] ?? null,
+            $payload['app_instance_id'] ?? null,
+        ];
+        foreach ($candidates as $id) {
+            if ($id !== null && $id !== '') {
+                return (string) $id;
+            }
         }
 
         $data = $payload['data'] ?? null;
@@ -231,6 +281,15 @@ class WixInstanceAuth
         }
         if (is_array($data)) {
             $id = $data['instanceId'] ?? $data['wixInstanceId'] ?? $data['instance_id'] ?? null;
+            if ($id) {
+                return (string) $id;
+            }
+        }
+
+        // context.appInstanceId (Wix SDK sometimes nests here)
+        $context = $payload['context'] ?? null;
+        if (is_array($context)) {
+            $id = $context['instanceId'] ?? $context['appInstanceId'] ?? $context['wixInstanceId'] ?? null;
             if ($id) {
                 return (string) $id;
             }
