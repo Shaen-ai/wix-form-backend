@@ -30,19 +30,9 @@ class FormController extends Controller
         $widgetInstanceId = $request->query('widgetInstanceId');
 
         if ($tenant && $widgetInstanceId) {
-            $form = Form::firstOrCreate(
-                [
-                    'tenant_id' => $tenant->id,
-                    'widget_instance_id' => $widgetInstanceId,
-                ],
-                [
-                    'name' => 'Contact Form',
-                    'description' => '',
-                    'is_active' => true,
-                ]
-            );
+            $form = $this->resolveFormForTenant($tenant, $widgetInstanceId);
 
-            if ($form->wasRecentlyCreated && $form->formFields()->count() === 0) {
+            if ($form->formFields()->count() === 0) {
                 $this->seedDefaultFields($form);
             }
 
@@ -100,19 +90,9 @@ class FormController extends Controller
             ?? $this->resolveTenantFromAuth($request);
 
         if ($tenant) {
-            $form = Form::firstOrCreate(
-                [
-                    'tenant_id'          => $tenant->id,
-                    'widget_instance_id' => $widgetInstanceId,
-                ],
-                [
-                    'name'        => 'Contact Form',
-                    'description' => '',
-                    'is_active'   => true,
-                ]
-            );
+            $form = $this->resolveFormForTenant($tenant, $widgetInstanceId);
 
-            if ($form->wasRecentlyCreated && $form->formFields()->count() === 0) {
+            if ($form->formFields()->count() === 0) {
                 $this->seedDefaultFields($form);
             }
 
@@ -128,7 +108,16 @@ class FormController extends Controller
             ->first();
 
         if (! $form) {
-            return response()->json(['data' => null]);
+            $form = Form::create([
+                'tenant_id'          => null,
+                'widget_instance_id' => $widgetInstanceId,
+                'name'               => 'Contact Form',
+                'description'        => '',
+                'is_active'          => true,
+            ]);
+
+            $this->seedDefaultFields($form);
+            $form->load('formFields');
         }
 
         $form->setAttribute('plan', $form->tenant?->plan ?? 'free');
@@ -202,19 +191,9 @@ class FormController extends Controller
             return response()->json(['message' => 'widgetInstanceId is required'], 422);
         }
 
-        $form = Form::firstOrCreate(
-            [
-                'tenant_id'          => $tenant->id,
-                'widget_instance_id' => $widgetInstanceId,
-            ],
-            [
-                'name'        => 'Contact Form',
-                'description' => '',
-                'is_active'   => true,
-            ]
-        );
+        $form = $this->resolveFormForTenant($tenant, $widgetInstanceId);
 
-        if ($form->wasRecentlyCreated && $form->formFields()->count() === 0) {
+        if ($form->formFields()->count() === 0) {
             $this->seedDefaultFields($form);
         }
 
@@ -240,6 +219,32 @@ class FormController extends Controller
 
         $form->update($validated);
         return response()->json($form);
+    }
+
+    /**
+     * Find or create a form for a tenant + widgetInstanceId pair.
+     * Adopts orphaned forms (tenant_id IS NULL) created by the
+     * unauthenticated widget path before the settings panel was opened.
+     */
+    private function resolveFormForTenant(Tenant $tenant, string $widgetInstanceId): Form
+    {
+        $form = Form::where('widget_instance_id', $widgetInstanceId)->first();
+
+        if ($form) {
+            if ($form->tenant_id === null) {
+                $form->update(['tenant_id' => $tenant->id]);
+            }
+
+            return $form;
+        }
+
+        return Form::create([
+            'tenant_id'          => $tenant->id,
+            'widget_instance_id' => $widgetInstanceId,
+            'name'               => 'Contact Form',
+            'description'        => '',
+            'is_active'          => true,
+        ]);
     }
 
     private function seedDefaultFields(Form $form): void
