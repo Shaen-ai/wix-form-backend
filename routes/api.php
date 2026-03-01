@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\V1\FeatureRequestController;
 use App\Http\Controllers\Api\V1\FileController;
 use App\Http\Controllers\Api\V1\FormController;
 use App\Http\Controllers\Api\V1\FormFieldController;
@@ -28,6 +29,8 @@ Route::prefix('v1')->group(function () {
             ->middleware('throttle:5,1');
         Route::post('/forms/{id}/translate', [FormFieldController::class, 'translate'])
             ->middleware('throttle:5,1');
+        Route::post('/feature-requests', [FeatureRequestController::class, 'store'])
+            ->middleware('throttle:10,1');
         Route::put('/forms/{id}/fields', [FormFieldController::class, 'update']);
         Route::get('/forms/{id}/submissions', [SubmissionController::class, 'index']);
         Route::get('/forms/{id}/submissions/export.csv', [SubmissionController::class, 'exportCsv']);
