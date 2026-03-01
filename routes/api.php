@@ -43,4 +43,6 @@ Route::prefix('v1')->group(function () {
 
     Route::post('/forms/{compId}/submit', [SubmitController::class, 'submit'])
         ->middleware('throttle:60,1');
+    Route::get('/forms/{compId}/submissions/{submissionId}', [SubmitController::class, 'getSubmissionForEdit']);
+    Route::put('/forms/{compId}/submissions/{submissionId}', [SubmitController::class, 'updateSubmission']);
 });

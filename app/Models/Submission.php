@@ -10,7 +10,7 @@ class Submission extends Model
 {
     protected $fillable = [
         'form_id', 'submitted_at', 'ip_hash',
-        'user_agent', 'data_json', 'wix_contact_id',
+        'user_agent', 'data_json', 'wix_contact_id', 'edit_token',
     ];
 
     protected $casts = [

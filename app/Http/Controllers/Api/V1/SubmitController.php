@@ -73,7 +73,7 @@ class SubmitController extends Controller
         $fields = $form->formFields()->get()->keyBy('id');
         $data = $this->normalizeCompoundFields($data, $fields);
 
-        $email = $this->extractEmail($data, $fields);
+        [$emailFieldId, $email] = $this->extractEmailAndFieldId($data, $fields);
 
         $monthlyLimit = $this->planService->monthlySubmissionLimit($form);
         if ($monthlyLimit > 0) {
@@ -94,9 +94,9 @@ class SubmitController extends Controller
             }
         }
 
-        if (! empty($formSettings['limitPerEmail']) && $email) {
+        if (! empty($formSettings['limitPerEmail']) && $email && $emailFieldId !== null) {
             $emailCount = Submission::where('form_id', $form->id)
-                ->whereJsonContains('data_json', $email)
+                ->where('data_json->'.$emailFieldId, $email)
                 ->count();
             if ($emailCount >= (int) $formSettings['limitPerEmail']) {
                 return response()->json(['message' => 'You have reached the submission limit for this email.'], 422);
@@ -119,7 +119,10 @@ class SubmitController extends Controller
             $wixContactId = $this->wixContacts->upsertContact($email, $data);
         }
 
-        $submission = DB::transaction(function () use ($form, $data, $wixContactId, $request, $fileIds) {
+        $allowEdit = ! empty($formSettings['allowEditSubmission']);
+        $editToken = $allowEdit ? bin2hex(random_bytes(32)) : null;
+
+        $submission = DB::transaction(function () use ($form, $data, $wixContactId, $request, $fileIds, $editToken) {
             $submission = Submission::create([
                 'form_id' => $form->id,
                 'submitted_at' => now(),
@@ -127,6 +130,7 @@ class SubmitController extends Controller
                 'user_agent' => $request->userAgent(),
                 'data_json' => $data,
                 'wix_contact_id' => $wixContactId,
+                'edit_token' => $editToken,
             ]);
 
             if (! empty($fileIds)) {
@@ -153,11 +157,111 @@ class SubmitController extends Controller
             'id' => $submission->id,
         ];
 
+        if ($allowEdit && $submission->edit_token) {
+            $response['edit_token'] = $submission->edit_token;
+        }
+
         if (! empty($formSettings['redirectUrl'])) {
             $response['redirect_url'] = $formSettings['redirectUrl'];
         }
 
         return response()->json($response);
+    }
+
+    public function getSubmissionForEdit(Request $request, string $compId, int $submissionId): JsonResponse
+    {
+        $editToken = $request->query('edit_token');
+        if (! $editToken || ! is_string($editToken)) {
+            return response()->json(['message' => 'Edit token required'], 400);
+        }
+
+        $form = Form::where('comp_id', $compId)->where('is_active', true)->first();
+        if (! $form) {
+            return response()->json(['message' => 'Form not found'], 404);
+        }
+
+        $formSettings = $form->settings_json ?? [];
+        if (empty($formSettings['allowEditSubmission'])) {
+            return response()->json(['message' => 'Editing is not allowed for this form'], 403);
+        }
+
+        $submission = Submission::where('id', $submissionId)
+            ->where('form_id', $form->id)
+            ->where('edit_token', $editToken)
+            ->first();
+
+        if (! $submission) {
+            return response()->json(['message' => 'Submission not found or edit token invalid'], 404);
+        }
+
+        $data = $submission->data_json ?? [];
+        $files = [];
+        foreach ($submission->submissionFiles as $sf) {
+            if ($sf->form_field_id !== null) {
+                $fid = (string) $sf->form_field_id;
+                if (! isset($files[$fid])) {
+                    $files[$fid] = [];
+                }
+                $files[$fid][] = ['file_id' => (string) $sf->id, 'name' => $sf->original_name];
+            }
+        }
+
+        return response()->json([
+            'data' => $data,
+            'files' => $files,
+        ]);
+    }
+
+    public function updateSubmission(Request $request, string $compId, int $submissionId): JsonResponse
+    {
+        $form = Form::where('comp_id', $compId)->where('is_active', true)->first();
+        if (! $form) {
+            return response()->json(['message' => 'Form not found'], 404);
+        }
+
+        if ($form->status === 'draft') {
+            return response()->json(['message' => 'This form is not yet published.'], 403);
+        }
+
+        $formSettings = $form->settings_json ?? [];
+        if (empty($formSettings['allowEditSubmission'])) {
+            return response()->json(['message' => 'Editing is not allowed for this form'], 403);
+        }
+
+        $validated = $request->validate([
+            'edit_token' => 'required|string',
+            'data' => 'required|array',
+            'file_ids' => 'nullable|array',
+            'file_ids.*' => 'string',
+        ]);
+
+        $submission = Submission::where('id', $submissionId)
+            ->where('form_id', $form->id)
+            ->where('edit_token', $validated['edit_token'])
+            ->first();
+
+        if (! $submission) {
+            return response()->json(['message' => 'Submission not found or edit token invalid'], 404);
+        }
+
+        $fields = $form->formFields()->get()->keyBy('id');
+        $data = $this->normalizeCompoundFields($validated['data'], $fields);
+        $fileIds = $validated['file_ids'] ?? [];
+
+        $submission->data_json = $data;
+        $submission->save();
+
+        if (! empty($fileIds)) {
+            SubmissionFile::where('submission_id', $submission->id)->update(['submission_id' => null]);
+            SubmissionFile::whereIn('id', $fileIds)
+                ->whereNull('submission_id')
+                ->update(['submission_id' => $submission->id]);
+        }
+
+        return response()->json([
+            'message' => $formSettings['successMessage'] ?? 'Your submission has been updated.',
+            'id' => $submission->id,
+        ]);
     }
 
     private function normalizeCompoundFields(array $data, $fields): array
@@ -234,15 +338,18 @@ class SubmitController extends Controller
         }
     }
 
-    private function extractEmail(array $data, $fields): ?string
+    /**
+     * @return array{0: ?int, 1: ?string} [emailFieldId, email] or [null, null]
+     */
+    private function extractEmailAndFieldId(array $data, $fields): array
     {
         foreach ($data as $fieldId => $value) {
             $field = $fields->get($fieldId);
             if ($field && $field->type === 'email' && is_string($value)) {
-                return $value;
+                return [(int) $fieldId, $value];
             }
         }
 
-        return null;
+        return [null, null];
     }
 }
