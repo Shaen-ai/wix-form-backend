@@ -59,7 +59,6 @@ Apply the requested changes and return a JSON object with two keys:
 - "name": string (form name)
 - "description": string or null
 - "language": language code string or null (e.g. "en", "es", "fr", "de", "pt", "it", "nl", "ru", "zh", "ja", "ko", "ar", "he", "hi", "tr", "pl", "sv", "da", "fi", "no")
-- "status": "draft" or "published"
 - "is_active": boolean
 - "settings_json": object with any of these optional properties:
   - "showFormName": boolean
@@ -182,7 +181,6 @@ PROMPT;
             'name' => $form->name,
             'description' => $form->description,
             'language' => $form->language,
-            'status' => $form->status,
             'is_active' => $form->is_active,
             'settings_json' => $form->settings_json ?? (object) [],
             'fields' => $existingFields->map(fn ($f) => [
@@ -228,7 +226,7 @@ PROMPT;
             $rawFields = $parsed['fields'] ?? [];
 
             if (!empty($formUpdates) && is_array($formUpdates)) {
-                $allowed = ['name', 'description', 'language', 'status', 'is_active'];
+                $allowed = ['name', 'description', 'language', 'is_active'];
                 $formData = array_intersect_key($formUpdates, array_flip($allowed));
 
                 if (isset($formUpdates['settings_json']) && is_array($formUpdates['settings_json'])) {
@@ -343,7 +341,7 @@ PROMPT;
             $rawFields = $parsed['fields'] ?? [];
 
             if (!empty($formUpdates) && is_array($formUpdates)) {
-                $allowed = ['name', 'description', 'language', 'status', 'is_active'];
+                $allowed = ['name', 'description', 'language', 'is_active'];
                 $formData = array_intersect_key($formUpdates, array_flip($allowed));
 
                 if (isset($formUpdates['settings_json']) && is_array($formUpdates['settings_json'])) {

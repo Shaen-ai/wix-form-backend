@@ -243,7 +243,6 @@ class FormController extends Controller
             'description' => 'nullable|string|max:2000',
             'settings_json' => 'nullable|array',
             'is_active' => 'boolean',
-            'status' => 'sometimes|string|in:draft,published',
             'language' => 'nullable|string|max:10',
         ]);
 

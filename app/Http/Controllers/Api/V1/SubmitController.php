@@ -34,10 +34,6 @@ class SubmitController extends Controller
             return response()->json(['message' => 'Form not found'], 404);
         }
 
-        if ($form->status === 'draft') {
-            return response()->json(['message' => 'This form is not yet published.'], 403);
-        }
-
         $formSettings = $form->settings_json ?? [];
 
         $validated = $request->validate([
@@ -217,10 +213,6 @@ class SubmitController extends Controller
         $form = Form::where('comp_id', $compId)->where('is_active', true)->first();
         if (! $form) {
             return response()->json(['message' => 'Form not found'], 404);
-        }
-
-        if ($form->status === 'draft') {
-            return response()->json(['message' => 'This form is not yet published.'], 403);
         }
 
         $formSettings = $form->settings_json ?? [];

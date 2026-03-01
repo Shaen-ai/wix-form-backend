@@ -10,7 +10,7 @@ class Form extends Model
 {
     protected $fillable = [
         'instance_id', 'comp_id', 'name', 'description',
-        'settings_json', 'is_active', 'status', 'language', 'plan',
+        'settings_json', 'is_active', 'language', 'plan',
     ];
 
     protected $casts = [
