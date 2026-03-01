@@ -15,8 +15,22 @@ class WixInstanceAuth
     {
         $auth = $request->header('Authorization');
 
+        // Apache CGI/FastCGI may strip Authorization; fall back to server env
+        if (! $auth && isset($_SERVER['HTTP_AUTHORIZATION'])) {
+            $auth = $_SERVER['HTTP_AUTHORIZATION'];
+            $request->headers->set('Authorization', $auth);
+        }
+        if (! $auth && isset($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
+            $auth = $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
+            $request->headers->set('Authorization', $auth);
+        }
+
         if (! $auth || ! str_starts_with($auth, 'Bearer ')) {
-            Log::warning('[WixInstanceAuth] Missing or invalid Authorization header');
+            Log::warning('[WixInstanceAuth] Missing or invalid Authorization header', [
+                'has_header' => (bool) $auth,
+                'method' => $request->method(),
+                'url' => $request->fullUrl(),
+            ]);
             return response()->json(['message' => 'Unauthorized'], 401);
         }
 
