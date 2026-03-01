@@ -178,7 +178,15 @@ class FormController extends Controller
     public function update(Request $request, int $id): JsonResponse
     {
         $instanceId = $request->attributes->get('instanceId');
-        $form = Form::where('instance_id', $instanceId)->findOrFail($id);
+
+        $form = Form::where(function ($q) use ($instanceId) {
+            $q->where('instance_id', $instanceId)
+              ->orWhereNull('instance_id');
+        })->findOrFail($id);
+
+        if ($form->instance_id === null && $instanceId) {
+            $form->instance_id = $instanceId;
+        }
 
         $validated = $request->validate([
             'name' => 'sometimes|string|max:255',
@@ -189,7 +197,8 @@ class FormController extends Controller
             'language' => 'nullable|string|max:10',
         ]);
 
-        $form->update($validated);
+        $form->fill($validated)->save();
+
         return response()->json($form);
     }
 
