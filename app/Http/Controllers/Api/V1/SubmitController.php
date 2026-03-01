@@ -193,12 +193,14 @@ class SubmitController extends Controller
     private function extractMemberId(Request $request): ?string
     {
         $auth = $request->header('Authorization');
-        if (! $auth || ! str_starts_with($auth, 'Bearer ')) {
+        if (! $auth) {
             return null;
         }
 
         try {
-            $token = substr($auth, 7);
+            $token = stripos($auth, 'bearer ') === 0
+                ? substr($auth, 7)
+                : $auth;
             $key = config('app.jwt_secret');
             $payload = null;
 

@@ -127,11 +127,13 @@ class FormController extends Controller
             }
         }
 
-        if (! $auth || ! str_starts_with($auth, 'Bearer ')) {
+        if (! $auth) {
             return null;
         }
 
-        $token = substr($auth, 7);
+        $token = stripos($auth, 'bearer ') === 0
+            ? substr($auth, 7)
+            : $auth;
         $key   = config('app.jwt_secret');
 
         $payload = null;
@@ -173,6 +175,9 @@ class FormController extends Controller
         }
 
         $data = $payload['data'] ?? null;
+        if (is_string($data)) {
+            $data = json_decode($data, true);
+        }
         if (is_array($data)) {
             $id = $data['instanceId'] ?? $data['wixInstanceId'] ?? $data['instance_id'] ?? null;
             if ($id) {

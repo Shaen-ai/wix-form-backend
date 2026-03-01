@@ -15,10 +15,8 @@ class WixInstanceAuth
     {
         $auth = $this->resolveAuthorizationHeader($request);
 
-        if (! $auth || ! str_starts_with($auth, 'Bearer ')) {
-            Log::warning('[WixInstanceAuth] Missing or invalid Authorization header', [
-                'has_header'   => (bool) $auth,
-                'prefix'       => $auth ? substr($auth, 0, 10) : null,
+        if (! $auth) {
+            Log::warning('[WixInstanceAuth] Missing Authorization header', [
                 'method'       => $request->method(),
                 'url'          => $request->fullUrl(),
                 'all_headers'  => array_keys($request->headers->all()),
@@ -26,8 +24,11 @@ class WixInstanceAuth
             return response()->json(['message' => 'Unauthorized'], 401);
         }
 
-        $token = substr($auth, 7);
-        $key   = config('app.jwt_secret');
+        $token = stripos($auth, 'bearer ') === 0
+            ? substr($auth, 7)
+            : $auth;
+
+        $key = config('app.jwt_secret');
 
         $payload = $this->decodeToken($token, $key);
 
@@ -222,6 +223,9 @@ class WixInstanceAuth
         }
 
         $data = $payload['data'] ?? null;
+        if (is_string($data)) {
+            $data = json_decode($data, true);
+        }
         if (is_array($data)) {
             $id = $data['instanceId'] ?? $data['wixInstanceId'] ?? $data['instance_id'] ?? null;
             if ($id) {
@@ -251,6 +255,9 @@ class WixInstanceAuth
         }
 
         $data = $payload['data'] ?? null;
+        if (is_string($data)) {
+            $data = json_decode($data, true);
+        }
         if (is_array($data)) {
             $id = $data['wixSiteId'] ?? $data['siteId'] ?? $data['site_id'] ?? null;
             if ($id) {
