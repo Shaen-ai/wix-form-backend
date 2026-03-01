@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Support\AuthHelper;
 use App\Models\Form;
 use Firebase\JWT\JWT;
 use Firebase\JWT\Key;
@@ -131,9 +132,10 @@ class FormController extends Controller
             return null;
         }
 
-        $token = stripos($auth, 'bearer ') === 0
-            ? substr($auth, 7)
-            : $auth;
+        $token = AuthHelper::extractTokenFromAuthHeader($auth);
+        if (! $token) {
+            return null;
+        }
         $key   = config('app.jwt_secret');
 
         $payload = null;

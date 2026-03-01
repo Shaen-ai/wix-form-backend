@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Support\AuthHelper;
 use Closure;
 use Firebase\JWT\JWT;
 use Firebase\JWT\Key;
@@ -24,9 +25,11 @@ class WixInstanceAuth
             return response()->json(['message' => 'Unauthorized'], 401);
         }
 
-        $token = stripos($auth, 'bearer ') === 0
-            ? substr($auth, 7)
-            : $auth;
+        $token = AuthHelper::extractTokenFromAuthHeader($auth);
+        if (! $token) {
+            Log::warning('[WixInstanceAuth] Empty token in Authorization header');
+            return response()->json(['message' => 'Unauthorized'], 401);
+        }
 
         $key = config('app.jwt_secret');
 

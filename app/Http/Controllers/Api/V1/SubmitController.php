@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Support\AuthHelper;
 use App\Models\Form;
 use App\Models\Submission;
 use App\Models\SubmissionFile;
@@ -197,10 +198,12 @@ class SubmitController extends Controller
             return null;
         }
 
+        $token = AuthHelper::extractTokenFromAuthHeader($auth);
+        if (! $token) {
+            return null;
+        }
+
         try {
-            $token = stripos($auth, 'bearer ') === 0
-                ? substr($auth, 7)
-                : $auth;
             $key = config('app.jwt_secret');
             $payload = null;
 
