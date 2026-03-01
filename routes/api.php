@@ -8,8 +8,11 @@ use App\Http\Controllers\Api\V1\SubmissionController;
 use App\Http\Controllers\Api\V1\TenantController;
 use App\Http\Controllers\Api\V1\TenantSettingsController;
 use App\Http\Controllers\Api\V1\UploadController;
+use App\Http\Controllers\WixController;
 use App\Http\Middleware\WixInstanceAuth;
 use Illuminate\Support\Facades\Route;
+
+Route::post('/wix_webhook_smartform', [WixController::class, 'handleWixWebhooksSmartForm']);
 
 Route::prefix('v1')->group(function () {
     Route::middleware(WixInstanceAuth::class)->group(function () {
