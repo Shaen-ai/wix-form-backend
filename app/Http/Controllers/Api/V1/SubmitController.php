@@ -26,9 +26,9 @@ class SubmitController extends Controller
         private PlanService $planService,
     ) {}
 
-    public function submit(Request $request, string $widgetInstanceId): JsonResponse
+    public function submit(Request $request, string $compId): JsonResponse
     {
-        $form = Form::where('widget_instance_id', $widgetInstanceId)->where('is_active', true)->first();
+        $form = Form::where('comp_id', $compId)->where('is_active', true)->first();
         if (! $form) {
             return response()->json(['message' => 'Form not found'], 404);
         }
@@ -38,7 +38,6 @@ class SubmitController extends Controller
         }
 
         $formSettings = $form->settings_json ?? [];
-        $tenant = $form->tenant;
 
         $validated = $request->validate([
             'data' => 'required|array',
@@ -59,7 +58,7 @@ class SubmitController extends Controller
             }
         }
 
-        $settings = $tenant->settings;
+        $settings = $form->settings;
         if ($settings?->recaptcha_enabled) {
             $token = $validated['recaptcha_token'] ?? '';
             if (! $this->recaptcha->verify($token, $request->ip())) {
@@ -75,9 +74,9 @@ class SubmitController extends Controller
 
         $email = $this->extractEmail($data, $fields);
 
-        $monthlyLimit = $this->planService->monthlySubmissionLimit($tenant);
+        $monthlyLimit = $this->planService->monthlySubmissionLimit($form);
         if ($monthlyLimit > 0) {
-            $monthlyCount = Submission::where('tenant_id', $tenant->id)
+            $monthlyCount = Submission::where('form_id', $form->id)
                 ->where('submitted_at', '>=', now()->startOfMonth())
                 ->count();
             if ($monthlyCount >= $monthlyLimit) {
@@ -119,9 +118,8 @@ class SubmitController extends Controller
             $wixContactId = $this->wixContacts->upsertContact($email, $data);
         }
 
-        $submission = DB::transaction(function () use ($form, $tenant, $data, $wixContactId, $request, $fileIds) {
+        $submission = DB::transaction(function () use ($form, $data, $wixContactId, $request, $fileIds) {
             $submission = Submission::create([
-                'tenant_id' => $tenant->id,
                 'form_id' => $form->id,
                 'submitted_at' => now(),
                 'ip_hash' => hash('sha256', $request->ip() . config('app.key')),

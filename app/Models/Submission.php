@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Submission extends Model
 {
     protected $fillable = [
-        'tenant_id', 'form_id', 'submitted_at', 'ip_hash',
+        'form_id', 'submitted_at', 'ip_hash',
         'user_agent', 'data_json', 'wix_contact_id',
     ];
 
@@ -17,11 +17,6 @@ class Submission extends Model
         'data_json' => 'array',
         'submitted_at' => 'datetime',
     ];
-
-    public function tenant(): BelongsTo
-    {
-        return $this->belongsTo(Tenant::class);
-    }
 
     public function form(): BelongsTo
     {

@@ -13,13 +13,12 @@ class SubmissionController extends Controller
 {
     public function index(Request $request, int $id): JsonResponse
     {
-        $tenant = $request->attributes->get('tenant');
-        $form = Form::where('tenant_id', $tenant->id)->findOrFail($id);
+        $instanceId = $request->attributes->get('instanceId');
+        $form = Form::where('instance_id', $instanceId)->findOrFail($id);
 
         $perPage = min((int) $request->query('per_page', 25), 100);
 
         $submissions = Submission::where('form_id', $form->id)
-            ->where('tenant_id', $tenant->id)
             ->orderBy('submitted_at', 'desc')
             ->paginate($perPage);
 
@@ -28,10 +27,9 @@ class SubmissionController extends Controller
 
     public function exportCsv(Request $request, int $id): StreamedResponse
     {
-        $tenant = $request->attributes->get('tenant');
-        $form = Form::where('tenant_id', $tenant->id)->findOrFail($id);
+        $instanceId = $request->attributes->get('instanceId');
+        $form = Form::where('instance_id', $instanceId)->findOrFail($id);
         $submissions = Submission::where('form_id', $form->id)
-            ->where('tenant_id', $tenant->id)
             ->orderBy('submitted_at', 'desc')
             ->get();
 

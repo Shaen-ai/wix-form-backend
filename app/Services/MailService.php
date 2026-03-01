@@ -5,15 +5,15 @@ namespace App\Services;
 use App\Mail\AutoReplyMail;
 use App\Mail\NotificationMail;
 use App\Models\Form;
+use App\Models\FormSettings;
 use App\Models\Submission;
-use App\Models\TenantSettings;
 use Illuminate\Support\Facades\Mail;
 
 class MailService
 {
-    public function sendNotification(Submission $submission, Form $form, ?TenantSettings $settings = null): void
+    public function sendNotification(Submission $submission, Form $form, ?FormSettings $settings = null): void
     {
-        $settings ??= TenantSettings::find($submission->tenant_id);
+        $settings ??= FormSettings::find($form->id);
         $formSettings = $form->settings_json ?? [];
 
         $email = ! empty($formSettings['adminNotificationEmail'])
@@ -27,9 +27,9 @@ class MailService
         Mail::to($email)->send(new NotificationMail($submission, $form));
     }
 
-    public function sendAutoReply(Submission $submission, Form $form, ?TenantSettings $settings = null): void
+    public function sendAutoReply(Submission $submission, Form $form, ?FormSettings $settings = null): void
     {
-        $settings ??= TenantSettings::find($submission->tenant_id);
+        $settings ??= FormSettings::find($form->id);
         $formSettings = $form->settings_json ?? [];
 
         $enabled = isset($formSettings['userConfirmationEmail'])

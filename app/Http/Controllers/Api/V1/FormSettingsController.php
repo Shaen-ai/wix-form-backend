@@ -3,18 +3,21 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
-use App\Models\TenantSettings;
+use App\Models\Form;
+use App\Models\FormSettings;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
-class TenantSettingsController extends Controller
+class FormSettingsController extends Controller
 {
-    public function show(Request $request): JsonResponse
+    public function show(Request $request, int $formId): JsonResponse
     {
-        $tenant = $request->attributes->get('tenant');
-        $settings = TenantSettings::find($tenant->id);
+        $instanceId = $request->attributes->get('instanceId');
+        $form = Form::where('instance_id', $instanceId)->findOrFail($formId);
+
+        $settings = FormSettings::find($form->id);
         return response()->json($settings ?? [
-            'tenant_id' => $tenant->id,
+            'form_id' => $form->id,
             'notification_email' => null,
             'auto_reply_enabled' => false,
             'auto_reply_subject' => null,
@@ -24,9 +27,11 @@ class TenantSettingsController extends Controller
         ]);
     }
 
-    public function update(Request $request): JsonResponse
+    public function update(Request $request, int $formId): JsonResponse
     {
-        $tenant = $request->attributes->get('tenant');
+        $instanceId = $request->attributes->get('instanceId');
+        $form = Form::where('instance_id', $instanceId)->findOrFail($formId);
+
         $validated = $request->validate([
             'notification_email' => 'nullable|email',
             'auto_reply_enabled' => 'boolean',
@@ -36,8 +41,8 @@ class TenantSettingsController extends Controller
             'recaptcha_mode' => 'nullable|string|in:v2_checkbox,v2_invisible,v3',
         ]);
 
-        $settings = TenantSettings::updateOrCreate(
-            ['tenant_id' => $tenant->id],
+        $settings = FormSettings::updateOrCreate(
+            ['form_id' => $form->id],
             $validated
         );
 

@@ -3,8 +3,8 @@
 namespace App\Mail;
 
 use App\Models\Form;
+use App\Models\FormSettings;
 use App\Models\Submission;
-use App\Models\TenantSettings;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Content;
@@ -18,7 +18,7 @@ class AutoReplyMail extends Mailable
     public function __construct(
         public Submission $submission,
         public Form $form,
-        public TenantSettings $settings
+        public FormSettings $settings
     ) {}
 
     public function envelope(): Envelope

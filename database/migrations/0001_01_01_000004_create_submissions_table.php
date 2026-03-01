@@ -10,7 +10,6 @@ return new class extends Migration
     {
         Schema::create('submissions', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('tenant_id')->constrained()->cascadeOnDelete();
             $table->foreignId('form_id')->constrained()->cascadeOnDelete();
             $table->timestamp('submitted_at');
             $table->string('ip_hash')->nullable();
@@ -20,7 +19,6 @@ return new class extends Migration
             $table->timestamps();
 
             $table->index('submitted_at');
-            $table->index(['tenant_id', 'form_id']);
         });
     }
 

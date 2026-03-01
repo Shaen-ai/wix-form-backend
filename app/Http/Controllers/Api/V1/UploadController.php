@@ -19,7 +19,7 @@ class UploadController extends Controller
 
     public function init(Request $request): JsonResponse
     {
-        $tenant = $request->attributes->get('tenant');
+        $instanceId = $request->attributes->get('instanceId');
 
         $validated = $request->validate([
             'form_field_id' => 'required|exists:form_fields,id',
@@ -28,8 +28,12 @@ class UploadController extends Controller
             'size_bytes' => 'required|integer|max:' . self::MAX_SINGLE_FILE_SIZE,
         ]);
 
-        $maxTotalBytes = $this->planService->maxTotalFileSizeBytes($tenant);
-        $currentUsage = SubmissionFile::whereHas('formField.form', fn ($q) => $q->where('tenant_id', $tenant->id))
+        $field = FormField::whereHas('form', fn ($q) => $q->where('instance_id', $instanceId))
+            ->findOrFail($validated['form_field_id']);
+
+        $form = $field->form;
+        $maxTotalBytes = $this->planService->maxTotalFileSizeBytes($form);
+        $currentUsage = SubmissionFile::whereHas('formField.form', fn ($q) => $q->where('id', $form->id))
             ->sum('size_bytes');
 
         if (($currentUsage + $validated['size_bytes']) > $maxTotalBytes) {
@@ -37,9 +41,6 @@ class UploadController extends Controller
                 'message' => 'File storage limit reached for your plan. Please upgrade for more storage.',
             ], 422);
         }
-
-        $field = FormField::whereHas('form', fn ($q) => $q->where('tenant_id', $tenant->id))
-            ->findOrFail($validated['form_field_id']);
 
         if ($field->type !== 'file_upload') {
             return response()->json(['message' => 'Invalid field type'], 422);
@@ -69,12 +70,12 @@ class UploadController extends Controller
 
     public function upload(Request $request, int $id): JsonResponse
     {
-        $tenant = $request->attributes->get('tenant');
+        $instanceId = $request->attributes->get('instanceId');
 
         $record = SubmissionFile::where('id', $id)
             ->whereNull('submission_id')
             ->where('virus_status', 'pending')
-            ->whereHas('formField.form', fn ($q) => $q->where('tenant_id', $tenant->id))
+            ->whereHas('formField.form', fn ($q) => $q->where('instance_id', $instanceId))
             ->firstOrFail();
 
         $content = $request->getContent();
@@ -99,7 +100,7 @@ class UploadController extends Controller
 
     public function complete(Request $request): JsonResponse
     {
-        $tenant = $request->attributes->get('tenant');
+        $instanceId = $request->attributes->get('instanceId');
 
         $validated = $request->validate([
             'file_id' => 'required|string',
@@ -107,7 +108,7 @@ class UploadController extends Controller
 
         $record = SubmissionFile::where('id', $validated['file_id'])
             ->whereNull('submission_id')
-            ->whereHas('formField.form', fn ($q) => $q->where('tenant_id', $tenant->id))
+            ->whereHas('formField.form', fn ($q) => $q->where('instance_id', $instanceId))
             ->firstOrFail();
 
         if (! Storage::disk($record->storage_disk)->exists($record->path)) {

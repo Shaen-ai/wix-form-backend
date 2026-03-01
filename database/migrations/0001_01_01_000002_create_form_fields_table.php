@@ -21,6 +21,10 @@ return new class extends Migration
             $table->json('logic_json')->nullable();
             $table->unsignedInteger('order_index')->default(0);
             $table->boolean('is_hidden_label')->default(false);
+            $table->text('default_value')->nullable();
+            $table->string('width', 10)->default('100');
+            $table->boolean('is_hidden')->default(false);
+            $table->unsignedInteger('page_index')->default(0);
             $table->timestamps();
         });
     }

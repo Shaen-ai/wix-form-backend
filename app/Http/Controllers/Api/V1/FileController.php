@@ -12,9 +12,9 @@ class FileController extends Controller
 {
     public function download(Request $request, int $id): StreamedResponse
     {
-        $tenant = $request->attributes->get('tenant');
+        $instanceId = $request->attributes->get('instanceId');
 
-        $file = SubmissionFile::whereHas('submission', fn ($q) => $q->where('tenant_id', $tenant->id))
+        $file = SubmissionFile::whereHas('submission.form', fn ($q) => $q->where('instance_id', $instanceId))
             ->findOrFail($id);
 
         if ($file->virus_status === 'infected') {

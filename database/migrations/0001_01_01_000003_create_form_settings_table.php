@@ -8,8 +8,8 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('tenant_settings', function (Blueprint $table) {
-            $table->foreignId('tenant_id')->primary()->constrained()->cascadeOnDelete();
+        Schema::create('form_settings', function (Blueprint $table) {
+            $table->foreignId('form_id')->primary()->constrained()->cascadeOnDelete();
             $table->string('notification_email')->nullable();
             $table->boolean('auto_reply_enabled')->default(false);
             $table->string('auto_reply_subject')->nullable();
@@ -21,6 +21,6 @@ return new class extends Migration
 
     public function down(): void
     {
-        Schema::dropIfExists('tenant_settings');
+        Schema::dropIfExists('form_settings');
     }
 };

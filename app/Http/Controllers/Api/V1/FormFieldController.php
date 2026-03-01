@@ -25,8 +25,8 @@ class FormFieldController extends Controller
 
     public function index(Request $request, int $id): JsonResponse
     {
-        $tenant = $request->attributes->get('tenant');
-        $form = Form::where('tenant_id', $tenant->id)->findOrFail($id);
+        $instanceId = $request->attributes->get('instanceId');
+        $form = Form::where('instance_id', $instanceId)->findOrFail($id);
         $fields = $form->formFields()->orderBy('order_index')->get();
         return response()->json(['data' => $fields]);
     }
@@ -95,8 +95,8 @@ PROMPT;
 
     public function generate(Request $request, int $id): JsonResponse
     {
-        $tenant = $request->attributes->get('tenant');
-        $form = Form::where('tenant_id', $tenant->id)->findOrFail($id);
+        $instanceId = $request->attributes->get('instanceId');
+        $form = Form::where('instance_id', $instanceId)->findOrFail($id);
 
         if ($form->formFields()->count() > 0) {
             return response()->json(['error' => 'Form already has fields. AI generation is only available for new forms.'], 422);
@@ -155,8 +155,8 @@ PROMPT;
 
     public function editWithAi(Request $request, int $id): JsonResponse
     {
-        $tenant = $request->attributes->get('tenant');
-        $form = Form::where('tenant_id', $tenant->id)->findOrFail($id);
+        $instanceId = $request->attributes->get('instanceId');
+        $form = Form::where('instance_id', $instanceId)->findOrFail($id);
 
         $request->validate([
             'prompt' => 'required|string|min:3|max:500',
@@ -293,8 +293,8 @@ PROMPT;
 
     public function update(Request $request, int $id): JsonResponse
     {
-        $tenant = $request->attributes->get('tenant');
-        $form = Form::where('tenant_id', $tenant->id)->findOrFail($id);
+        $instanceId = $request->attributes->get('instanceId');
+        $form = Form::where('instance_id', $instanceId)->findOrFail($id);
 
         $validated = $request->validate([
             'fields' => 'required|array',

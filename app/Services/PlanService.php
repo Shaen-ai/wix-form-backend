@@ -2,7 +2,7 @@
 
 namespace App\Services;
 
-use App\Models\Tenant;
+use App\Models\Form;
 
 class PlanService
 {
@@ -13,29 +13,29 @@ class PlanService
         'business_pro' => ['max_total_file_size_mb' => 0,    'monthly_submissions' => 0,     'show_branding' => false],
     ];
 
-    public function isPaid(Tenant $tenant): bool
+    public function isPaid(Form $form): bool
     {
-        return $tenant->plan !== 'free';
+        return ($form->plan ?? 'free') !== 'free';
     }
 
-    public function getLimits(Tenant $tenant): array
+    public function getLimits(Form $form): array
     {
-        return self::PLAN_LIMITS[$tenant->plan] ?? self::PLAN_LIMITS['free'];
+        return self::PLAN_LIMITS[$form->plan ?? 'free'] ?? self::PLAN_LIMITS['free'];
     }
 
-    public function maxTotalFileSizeBytes(Tenant $tenant): int
+    public function maxTotalFileSizeBytes(Form $form): int
     {
-        $mb = $this->getLimits($tenant)['max_total_file_size_mb'];
+        $mb = $this->getLimits($form)['max_total_file_size_mb'];
         return $mb === 0 ? PHP_INT_MAX : $mb * 1024 * 1024;
     }
 
-    public function monthlySubmissionLimit(Tenant $tenant): int
+    public function monthlySubmissionLimit(Form $form): int
     {
-        return $this->getLimits($tenant)['monthly_submissions'];
+        return $this->getLimits($form)['monthly_submissions'];
     }
 
-    public function showBranding(Tenant $tenant): bool
+    public function showBranding(Form $form): bool
     {
-        return $this->getLimits($tenant)['show_branding'];
+        return $this->getLimits($form)['show_branding'];
     }
 }

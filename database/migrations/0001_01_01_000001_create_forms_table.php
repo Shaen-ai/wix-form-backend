@@ -10,13 +10,18 @@ return new class extends Migration
     {
         Schema::create('forms', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('tenant_id')->constrained()->cascadeOnDelete();
-            $table->string('widget_instance_id')->unique();
+            $table->string('instance_id')->index();
+            $table->string('comp_id');
             $table->string('name');
             $table->text('description')->nullable();
             $table->json('settings_json')->nullable();
             $table->boolean('is_active')->default(true);
+            $table->enum('status', ['draft', 'published'])->default('draft');
+            $table->string('language', 10)->nullable();
+            $table->string('plan', 20)->default('free');
             $table->timestamps();
+
+            $table->unique(['instance_id', 'comp_id']);
         });
     }
 

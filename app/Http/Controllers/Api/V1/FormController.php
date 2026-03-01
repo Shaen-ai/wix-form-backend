@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\Form;
-use App\Models\Tenant;
 use Firebase\JWT\JWT;
 use Firebase\JWT\Key;
 use Illuminate\Http\JsonResponse;
@@ -14,50 +13,44 @@ use Illuminate\Support\Facades\Log;
 class FormController extends Controller
 {
     /**
-     * GET /forms — works with OR without auth.
-     *
-     * Authenticated (settings panel / widget with token):
-     *   tenant-scoped, creates form via firstOrCreate if widgetInstanceId given.
-     *
-     * Unauthenticated (widget in editor):
-     *   read-only lookup by widgetInstanceId; requires X-Wix-Comp-Id header.
+     * GET /forms — list forms for the authenticated instance,
+     * or read-only lookup by comp_id when unauthenticated.
      */
     public function index(Request $request): JsonResponse
     {
-        $tenant = $request->attributes->get('tenant')
-            ?? $this->resolveTenantFromAuth($request);
+        $instanceId = $request->attributes->get('instanceId')
+            ?? $this->resolveInstanceIdFromAuth($request);
 
-        $widgetInstanceId = $request->query('widgetInstanceId');
+        $compId = $request->query('compId')
+            ?? $request->query('widgetInstanceId');
 
-        if ($tenant && $widgetInstanceId) {
-            $form = $this->resolveFormForTenant($tenant, $widgetInstanceId);
+        if ($instanceId && $compId) {
+            $form = $this->resolveForm($instanceId, $compId);
 
             if ($form->formFields()->count() === 0) {
                 $this->seedDefaultFields($form);
             }
 
             $form->load('formFields');
-            $form->setAttribute('plan', $tenant->plan ?? 'free');
 
             return response()->json(['data' => [$form]]);
         }
 
-        if ($tenant) {
-            $forms = Form::where('tenant_id', $tenant->id)
+        if ($instanceId) {
+            $forms = Form::where('instance_id', $instanceId)
                 ->orderBy('created_at', 'desc')
                 ->get();
 
             return response()->json(['data' => $forms]);
         }
 
-        // No auth — allow read-only lookup with X-Wix-Comp-Id
-        $compId = $request->header('X-Wix-Comp-Id');
+        $compId = $request->header('X-Wix-Comp-Id') ?? $compId;
 
-        if (! $widgetInstanceId || ! $compId) {
+        if (! $compId) {
             return response()->json(['message' => 'Unauthorized'], 401);
         }
 
-        $form = Form::where('widget_instance_id', $widgetInstanceId)
+        $form = Form::where('comp_id', $compId)
             ->where('is_active', true)
             ->with('formFields')
             ->first();
@@ -66,71 +59,61 @@ class FormController extends Controller
             return response()->json(['data' => []]);
         }
 
-        $form->setAttribute('plan', $form->tenant?->plan ?? 'free');
-
         return response()->json(['data' => [$form]]);
     }
 
     /**
      * GET /form — returns a single form for the widget.
-     *
-     * Reads widgetInstanceId from the X-Wix-Comp-Id header.
-     * If authenticated and the form doesn't exist, creates it with defaults.
-     * If unauthenticated, performs a read-only lookup.
+     * Reads comp_id from the X-Wix-Comp-Id header.
      */
     public function showByWidget(Request $request): JsonResponse
     {
-        $widgetInstanceId = $request->header('X-Wix-Comp-Id');
+        $compId = $request->header('X-Wix-Comp-Id');
 
-        if (! $widgetInstanceId) {
+        if (! $compId) {
             return response()->json(['message' => 'X-Wix-Comp-Id header is required'], 422);
         }
 
-        $tenant = $request->attributes->get('tenant')
-            ?? $this->resolveTenantFromAuth($request);
+        $instanceId = $request->attributes->get('instanceId')
+            ?? $this->resolveInstanceIdFromAuth($request);
 
-        if ($tenant) {
-            $form = $this->resolveFormForTenant($tenant, $widgetInstanceId);
+        if ($instanceId) {
+            $form = $this->resolveForm($instanceId, $compId);
 
             if ($form->formFields()->count() === 0) {
                 $this->seedDefaultFields($form);
             }
 
             $form->load('formFields');
-            $form->setAttribute('plan', $tenant->plan ?? 'free');
 
             return response()->json(['data' => $form]);
         }
 
-        $form = Form::where('widget_instance_id', $widgetInstanceId)
+        $form = Form::where('comp_id', $compId)
             ->where('is_active', true)
             ->with('formFields')
             ->first();
 
         if (! $form) {
             $form = Form::create([
-                'tenant_id'          => null,
-                'widget_instance_id' => $widgetInstanceId,
-                'name'               => 'Contact Form',
-                'description'        => '',
-                'is_active'          => true,
+                'instance_id' => null,
+                'comp_id'     => $compId,
+                'name'        => 'Contact Form',
+                'description' => '',
+                'is_active'   => true,
             ]);
 
             $this->seedDefaultFields($form);
             $form->load('formFields');
         }
 
-        $form->setAttribute('plan', $form->tenant?->plan ?? 'free');
-
         return response()->json(['data' => $form]);
     }
 
     /**
-     * Try to resolve tenant from Authorization header inline (so the route
-     * can live outside the WixInstanceAuth middleware while still supporting
-     * authenticated callers like the settings panel).
+     * Try to resolve instance ID from Authorization header inline.
      */
-    private function resolveTenantFromAuth(Request $request): ?Tenant
+    private function resolveInstanceIdFromAuth(Request $request): ?string
     {
         $auth = $request->header('Authorization');
         if (! $auth || ! str_starts_with($auth, 'Bearer ')) {
@@ -158,55 +141,44 @@ class FormController extends Controller
             return null;
         }
 
-        $wixSiteId = $payload['wixSiteId'] ?? $payload['siteId'] ?? null;
-        $wixInstanceId = $payload['wixInstanceId'] ?? $payload['instanceId'] ?? null;
-
-        if (! $wixSiteId) {
-            return null;
-        }
-
-        return Tenant::updateOrCreate(
-            ['wix_site_id' => $wixSiteId],
-            ['plan' => app()->environment('local') ? 'premium' : 'free', 'wix_instance_id' => $wixInstanceId]
-        );
+        return $payload['wixInstanceId'] ?? $payload['instanceId'] ?? null;
     }
 
     /**
      * POST /forms/ensure — idempotently ensure a form exists for the
-     * authenticated tenant + widgetInstanceId pair.  Returns the form
-     * (with fields) whether it was just created or already existed.
+     * authenticated instance + comp_id pair.
      */
     public function ensure(Request $request): JsonResponse
     {
-        $tenant = $request->attributes->get('tenant');
+        $instanceId = $request->attributes->get('instanceId');
 
-        if (! $tenant) {
+        if (! $instanceId) {
             return response()->json(['message' => 'Unauthorized'], 401);
         }
 
-        $widgetInstanceId = $request->input('widgetInstanceId')
+        $compId = $request->input('compId')
+            ?? $request->input('widgetInstanceId')
             ?? $request->header('X-Wix-Comp-Id');
 
-        if (! $widgetInstanceId) {
-            return response()->json(['message' => 'widgetInstanceId is required'], 422);
+        if (! $compId) {
+            return response()->json(['message' => 'compId is required'], 422);
         }
 
-        $form = $this->resolveFormForTenant($tenant, $widgetInstanceId);
+        $form = $this->resolveForm($instanceId, $compId);
 
         if ($form->formFields()->count() === 0) {
             $this->seedDefaultFields($form);
         }
 
         $form->load('formFields');
-        $form->setAttribute('plan', $tenant->plan ?? 'free');
 
         return response()->json(['data' => $form]);
     }
 
     public function update(Request $request, int $id): JsonResponse
     {
-        $tenant = $request->attributes->get('tenant');
-        $form = Form::where('tenant_id', $tenant->id)->findOrFail($id);
+        $instanceId = $request->attributes->get('instanceId');
+        $form = Form::where('instance_id', $instanceId)->findOrFail($id);
 
         $validated = $request->validate([
             'name' => 'sometimes|string|max:255',
@@ -222,28 +194,28 @@ class FormController extends Controller
     }
 
     /**
-     * Find or create a form for a tenant + widgetInstanceId pair.
-     * Adopts orphaned forms (tenant_id IS NULL) created by the
-     * unauthenticated widget path before the settings panel was opened.
+     * Find or create a form for an instance_id + comp_id pair.
+     * Adopts orphaned forms (instance_id IS NULL) created by the
+     * unauthenticated widget path.
      */
-    private function resolveFormForTenant(Tenant $tenant, string $widgetInstanceId): Form
+    private function resolveForm(string $instanceId, string $compId): Form
     {
-        $form = Form::where('widget_instance_id', $widgetInstanceId)->first();
+        $form = Form::where('comp_id', $compId)->first();
 
         if ($form) {
-            if ($form->tenant_id === null) {
-                $form->update(['tenant_id' => $tenant->id]);
+            if ($form->instance_id === null) {
+                $form->update(['instance_id' => $instanceId]);
             }
 
             return $form;
         }
 
         return Form::create([
-            'tenant_id'          => $tenant->id,
-            'widget_instance_id' => $widgetInstanceId,
-            'name'               => 'Contact Form',
-            'description'        => '',
-            'is_active'          => true,
+            'instance_id' => $instanceId,
+            'comp_id'     => $compId,
+            'name'        => 'Contact Form',
+            'description' => '',
+            'is_active'   => true,
         ]);
     }
 
