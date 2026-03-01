@@ -16,7 +16,7 @@ return [
             'host' => env('MAIL_HOST', 'smtp.mailgun.org'),
             'port' => env('MAIL_PORT', 587),
             // Use null for no encryption (local Postfix); .env values are strings so "null" must be normalized
-            'encryption' => in_array(env('MAIL_ENCRYPTION'), ['', 'null'], true) ? null : (env('MAIL_ENCRYPTION') ?? 'tls'),
+            'encryption' => in_array(env('MAIL_ENCRYPTION'), [null, '', 'null'], true) ? null : env('MAIL_ENCRYPTION'),
             'username' => env('MAIL_USERNAME'),
             'password' => env('MAIL_PASSWORD'),
         ],
