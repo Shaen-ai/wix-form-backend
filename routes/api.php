@@ -17,12 +17,14 @@ Route::post('/wix_webhook_smartform', [WixController::class, 'handleWixWebhooksS
 Route::prefix('v1')->group(function () {
     // Public: widget reads form by widgetInstanceId (auth resolved inline)
     Route::get('/forms', [FormController::class, 'index']);
+    Route::get('/form', [FormController::class, 'showByWidget']);
 
     Route::middleware(WixInstanceAuth::class)->group(function () {
         Route::get('/tenant/me', [TenantController::class, 'me']);
         Route::get('/tenant/settings', [TenantSettingsController::class, 'show']);
         Route::put('/tenant/settings', [TenantSettingsController::class, 'update']);
 
+        Route::post('/forms/ensure', [FormController::class, 'ensure']);
         Route::put('/forms/{id}', [FormController::class, 'update']);
         Route::get('/forms/{id}/fields', [FormFieldController::class, 'index']);
         Route::post('/forms/{id}/generate-fields', [FormFieldController::class, 'generate'])
