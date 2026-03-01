@@ -200,20 +200,30 @@ class SubmitController extends Controller
         try {
             $token = substr($auth, 7);
             $key = config('app.jwt_secret');
+            $payload = null;
 
-            if (empty($key)) {
-                if (app()->environment('production')) {
-                    return null;
+            if ($key) {
+                try {
+                    $payload = (array) JWT::decode($token, new Key($key, 'HS256'));
+                } catch (\Throwable) {
+                    // fall through to payload decode
                 }
-                $parts = explode('.', $token);
-                $payload = isset($parts[1])
-                    ? (json_decode(base64_decode(strtr($parts[1], '-_', '+/')), true) ?? [])
-                    : [];
-            } else {
-                $payload = (array) JWT::decode($token, new Key($key, 'HS256'));
             }
 
-            return $payload['memberId'] ?? null;
+            if ($payload === null) {
+                $parts = explode('.', $token);
+                if (isset($parts[1])) {
+                    $decoded = json_decode(
+                        base64_decode(strtr($parts[1], '-_', '+/')),
+                        true,
+                    );
+                    if (is_array($decoded)) {
+                        $payload = $decoded;
+                    }
+                }
+            }
+
+            return is_array($payload) ? ($payload['memberId'] ?? null) : null;
         } catch (\Throwable) {
             return null;
         }

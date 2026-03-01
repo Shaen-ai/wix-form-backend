@@ -112,36 +112,79 @@ class FormController extends Controller
 
     /**
      * Try to resolve instance ID from Authorization header inline.
+     * Uses the same multi-strategy approach as WixInstanceAuth middleware.
      */
     private function resolveInstanceIdFromAuth(Request $request): ?string
     {
         $auth = $request->header('Authorization');
+
+        if (! $auth && function_exists('getallheaders')) {
+            foreach (getallheaders() as $name => $value) {
+                if (strcasecmp($name, 'Authorization') === 0) {
+                    $auth = $value;
+                    break;
+                }
+            }
+        }
+
         if (! $auth || ! str_starts_with($auth, 'Bearer ')) {
             return null;
         }
 
         $token = substr($auth, 7);
+        $key   = config('app.jwt_secret');
 
-        try {
-            $key = config('app.jwt_secret');
+        $payload = null;
 
-            if (empty($key)) {
-                if (app()->environment('production')) {
-                    return null;
-                }
-                $parts = explode('.', $token);
-                $payload = isset($parts[1])
-                    ? (json_decode(base64_decode(strtr($parts[1], '-_', '+/')), true) ?? [])
-                    : [];
-            } else {
+        if ($key) {
+            try {
                 $payload = (array) JWT::decode($token, new Key($key, 'HS256'));
+            } catch (\Throwable $e) {
+                Log::debug('[FormController] HS256 decode failed, trying fallback', [
+                    'error' => $e->getMessage(),
+                ]);
             }
-        } catch (\Throwable $e) {
-            Log::debug('[FormController] Inline JWT decode failed', ['error' => $e->getMessage()]);
+        }
+
+        if ($payload === null) {
+            $parts = explode('.', $token);
+            if (isset($parts[1])) {
+                $decoded = json_decode(
+                    base64_decode(strtr($parts[1], '-_', '+/')),
+                    true,
+                );
+                if (is_array($decoded)) {
+                    $payload = $decoded;
+                }
+            }
+        }
+
+        if (! is_array($payload)) {
             return null;
         }
 
-        return $payload['wixInstanceId'] ?? $payload['instanceId'] ?? null;
+        $id = $payload['instanceId']
+            ?? $payload['wixInstanceId']
+            ?? $payload['instance_id']
+            ?? null;
+
+        if ($id) {
+            return (string) $id;
+        }
+
+        $data = $payload['data'] ?? null;
+        if (is_array($data)) {
+            $id = $data['instanceId'] ?? $data['wixInstanceId'] ?? $data['instance_id'] ?? null;
+            if ($id) {
+                return (string) $id;
+            }
+        }
+
+        if (isset($payload['sub']) && is_string($payload['sub']) && $payload['sub'] !== '') {
+            return $payload['sub'];
+        }
+
+        return null;
     }
 
     /**

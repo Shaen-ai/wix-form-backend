@@ -14,7 +14,7 @@ class SubmissionController extends Controller
     public function index(Request $request, int $id): JsonResponse
     {
         $instanceId = $request->attributes->get('instanceId');
-        $form = Form::where('instance_id', $instanceId)->findOrFail($id);
+        $form = $this->resolveForm($instanceId, $id);
 
         $perPage = min((int) $request->query('per_page', 25), 100);
 
@@ -28,7 +28,7 @@ class SubmissionController extends Controller
     public function exportCsv(Request $request, int $id): StreamedResponse
     {
         $instanceId = $request->attributes->get('instanceId');
-        $form = Form::where('instance_id', $instanceId)->findOrFail($id);
+        $form = $this->resolveForm($instanceId, $id);
         $submissions = Submission::where('form_id', $form->id)
             ->orderBy('submitted_at', 'desc')
             ->get();
@@ -63,5 +63,19 @@ class SubmissionController extends Controller
         }, "submissions-{$id}.csv", [
             'Content-Type' => 'text/csv',
         ]);
+    }
+
+    private function resolveForm(?string $instanceId, int $id): Form
+    {
+        $form = Form::where(function ($q) use ($instanceId) {
+            $q->where('instance_id', $instanceId)
+              ->orWhereNull('instance_id');
+        })->findOrFail($id);
+
+        if ($form->instance_id === null && $instanceId) {
+            $form->update(['instance_id' => $instanceId]);
+        }
+
+        return $form;
     }
 }

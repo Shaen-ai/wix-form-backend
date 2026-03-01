@@ -13,7 +13,7 @@ class FormSettingsController extends Controller
     public function show(Request $request, int $formId): JsonResponse
     {
         $instanceId = $request->attributes->get('instanceId');
-        $form = Form::where('instance_id', $instanceId)->findOrFail($formId);
+        $form = $this->resolveForm($instanceId, $formId);
 
         $settings = FormSettings::find($form->id);
         return response()->json($settings ?? [
@@ -30,7 +30,7 @@ class FormSettingsController extends Controller
     public function update(Request $request, int $formId): JsonResponse
     {
         $instanceId = $request->attributes->get('instanceId');
-        $form = Form::where('instance_id', $instanceId)->findOrFail($formId);
+        $form = $this->resolveForm($instanceId, $formId);
 
         $validated = $request->validate([
             'notification_email' => 'nullable|email',
@@ -47,5 +47,19 @@ class FormSettingsController extends Controller
         );
 
         return response()->json($settings);
+    }
+
+    private function resolveForm(?string $instanceId, int $formId): Form
+    {
+        $form = Form::where(function ($q) use ($instanceId) {
+            $q->where('instance_id', $instanceId)
+              ->orWhereNull('instance_id');
+        })->findOrFail($formId);
+
+        if ($form->instance_id === null && $instanceId) {
+            $form->update(['instance_id' => $instanceId]);
+        }
+
+        return $form;
     }
 }

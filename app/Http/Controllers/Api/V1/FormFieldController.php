@@ -26,7 +26,7 @@ class FormFieldController extends Controller
     public function index(Request $request, int $id): JsonResponse
     {
         $instanceId = $request->attributes->get('instanceId');
-        $form = Form::where('instance_id', $instanceId)->findOrFail($id);
+        $form = $this->resolveForm($instanceId, $id);
         $fields = $form->formFields()->orderBy('order_index')->get();
         return response()->json(['data' => $fields]);
     }
@@ -96,7 +96,7 @@ PROMPT;
     public function generate(Request $request, int $id): JsonResponse
     {
         $instanceId = $request->attributes->get('instanceId');
-        $form = Form::where('instance_id', $instanceId)->findOrFail($id);
+        $form = $this->resolveForm($instanceId, $id);
 
         if ($form->formFields()->count() > 0) {
             return response()->json(['error' => 'Form already has fields. AI generation is only available for new forms.'], 422);
@@ -156,7 +156,7 @@ PROMPT;
     public function editWithAi(Request $request, int $id): JsonResponse
     {
         $instanceId = $request->attributes->get('instanceId');
-        $form = Form::where('instance_id', $instanceId)->findOrFail($id);
+        $form = $this->resolveForm($instanceId, $id);
 
         $request->validate([
             'prompt' => 'required|string|min:3|max:500',
@@ -259,6 +259,20 @@ PROMPT;
         }
     }
 
+    private function resolveForm(?string $instanceId, int $id): Form
+    {
+        $form = Form::where(function ($q) use ($instanceId) {
+            $q->where('instance_id', $instanceId)
+              ->orWhereNull('instance_id');
+        })->findOrFail($id);
+
+        if ($form->instance_id === null && $instanceId) {
+            $form->update(['instance_id' => $instanceId]);
+        }
+
+        return $form;
+    }
+
     private function sanitizeAiFields(array $rawFields): array
     {
         $sanitized = [];
@@ -294,7 +308,7 @@ PROMPT;
     public function update(Request $request, int $id): JsonResponse
     {
         $instanceId = $request->attributes->get('instanceId');
-        $form = Form::where('instance_id', $instanceId)->findOrFail($id);
+        $form = $this->resolveForm($instanceId, $id);
 
         $validated = $request->validate([
             'fields' => 'required|array',
