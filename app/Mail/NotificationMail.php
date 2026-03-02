@@ -68,8 +68,12 @@ class NotificationMail extends Mailable
 
     public function envelope(): Envelope
     {
+        $subject = trim((string) $this->form->name) !== ''
+            ? $this->form->name
+            : 'New form submission';
+
         $envelope = new Envelope(
-            subject: "New submission: {$this->form->name}",
+            subject: $subject,
         );
 
         if ($this->submitterEmail) {

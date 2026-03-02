@@ -1,5 +1,16 @@
 <?php
 
+/*
+|--------------------------------------------------------------------------
+| PsySH / Tinker config directory
+|--------------------------------------------------------------------------
+| When running artisan commands (e.g. tinker) as www-data or in restricted
+| environments, PsySH cannot write to ~/.config/psysh. Redirect to storage.
+*/
+if (! getenv('XDG_CONFIG_HOME')) {
+    putenv('XDG_CONFIG_HOME=' . dirname(__DIR__) . '/storage');
+}
+
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
