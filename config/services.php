@@ -4,6 +4,8 @@ return [
     'recaptcha' => [
         'secret' => env('RECAPTCHA_SECRET'),
         'site_key' => env('RECAPTCHA_SITE_KEY'),
+        'project_id' => env('RECAPTCHA_PROJECT_ID'),
+        'api_key' => env('RECAPTCHA_API_KEY'),
     ],
 
     'clamav' => [
