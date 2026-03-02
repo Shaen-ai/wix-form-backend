@@ -9,7 +9,6 @@ use App\Models\Submission;
 use App\Models\SubmissionFile;
 use App\Services\MailService;
 use App\Services\PlanService;
-use App\Services\RecaptchaService;
 use App\Services\WixContactsService;
 use Firebase\JWT\JWT;
 use Firebase\JWT\Key;
@@ -21,7 +20,6 @@ use Illuminate\Support\Facades\Log;
 class SubmitController extends Controller
 {
     public function __construct(
-        private RecaptchaService $recaptcha,
         private WixContactsService $wixContacts,
         private MailService $mail,
         private PlanService $planService,
@@ -38,7 +36,6 @@ class SubmitController extends Controller
 
         $validated = $request->validate([
             'data' => 'required|array',
-            'recaptcha_token' => 'nullable|string',
             'file_ids' => 'nullable|array',
             'file_ids.*' => 'string',
             '_hp_field' => 'nullable|string',
@@ -52,16 +49,6 @@ class SubmitController extends Controller
             $memberId = $this->extractMemberId($request);
             if (! $memberId) {
                 return response()->json(['message' => 'This form is available to members only. Please log in to submit.'], 403);
-            }
-        }
-
-        $recaptchaEnabled = array_key_exists('recaptchaEnabled', $formSettings)
-            ? ($formSettings['recaptchaEnabled'] === true)
-            : ($form->settings?->recaptcha_enabled ?? false);
-        if ($recaptchaEnabled) {
-            $token = $validated['recaptcha_token'] ?? '';
-            if (! $this->recaptcha->verify($token, $request->ip())) {
-                return response()->json(['message' => 'reCAPTCHA verification failed'], 422);
             }
         }
 

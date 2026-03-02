@@ -14,12 +14,10 @@ class FormSettings extends Model
     protected $fillable = [
         'form_id', 'notification_email', 'auto_reply_enabled',
         'auto_reply_subject', 'auto_reply_body',
-        'recaptcha_enabled', 'recaptcha_mode',
     ];
 
     protected $casts = [
         'auto_reply_enabled' => 'boolean',
-        'recaptcha_enabled' => 'boolean',
     ];
 
     public function form(): BelongsTo

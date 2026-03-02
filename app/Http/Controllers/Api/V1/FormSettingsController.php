@@ -22,8 +22,6 @@ class FormSettingsController extends Controller
             'auto_reply_enabled' => false,
             'auto_reply_subject' => null,
             'auto_reply_body' => null,
-            'recaptcha_enabled' => true,
-            'recaptcha_mode' => null,
         ]);
     }
 
@@ -37,8 +35,6 @@ class FormSettingsController extends Controller
             'auto_reply_enabled' => 'boolean',
             'auto_reply_subject' => 'nullable|string',
             'auto_reply_body' => 'nullable|string',
-            'recaptcha_enabled' => 'boolean',
-            'recaptcha_mode' => 'nullable|string|in:v2_checkbox,v2_invisible,v3',
         ]);
 
         $settings = FormSettings::updateOrCreate(
