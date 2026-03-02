@@ -38,6 +38,7 @@ class WixInstanceAuth
             Log::debug('[WixInstanceAuth] Verified via Wix Token Info API');
             $request->attributes->set('instanceId', $tokenInfo['instanceId']);
             $request->attributes->set('wixSiteId', $tokenInfo['wixSiteId']);
+            $request->attributes->set('instanceToken', $token);
 
             // Decode the raw token payload to extract vendorProductId (not returned by Token Info API)
             $rawPayload = $this->tryDecodePayloadWithoutVerification($token);
@@ -85,6 +86,7 @@ class WixInstanceAuth
         $request->attributes->set('instanceId', $instanceId);
         $request->attributes->set('wixSiteId', $wixSiteId);
         $request->attributes->set('vendorProductId', $this->extractVendorProductId($payload));
+        $request->attributes->set('instanceToken', $token);
 
         return $next($request);
     }

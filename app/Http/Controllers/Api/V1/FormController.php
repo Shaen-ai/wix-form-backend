@@ -98,6 +98,21 @@ class FormController extends Controller
         if ($instanceId) {
             $form = $this->resolveForm($instanceId, $compId);
 
+            // Sync plan from token — vendorProductId may be in middleware attributes
+            // or must be extracted directly (this route is not behind WixInstanceAuth).
+            $vendorProductId = $request->attributes->get('vendorProductId')
+                ?? $this->extractVendorProductIdFromAuth($request);
+
+            $plan = $this->planService->planFromVendorProductId($vendorProductId);
+            if ($form->plan !== $plan) {
+                $form->update(['plan' => $plan]);
+                Log::debug('[FormController] showByWidget: synced plan', [
+                    'form_id'         => $form->id,
+                    'vendorProductId' => $vendorProductId,
+                    'plan'            => $plan,
+                ]);
+            }
+
             if ($form->formFields()->count() === 0) {
                 $this->seedDefaultFields($form);
             }
@@ -106,7 +121,11 @@ class FormController extends Controller
 
             return response()->json([
                 'data' => $form,
-                'meta' => ['instance_id' => $instanceId],
+                'meta' => [
+                    'instance_id'      => $instanceId,
+                    'instance_token'   => $request->attributes->get('instanceToken'),
+                    'decoded_instance' => $this->resolveTokenPayloadFromAuth($request),
+                ],
             ]);
         }
 
@@ -132,7 +151,10 @@ class FormController extends Controller
 
         return response()->json([
             'data' => $form,
-            'meta' => ['instance_id' => $resolvedInstanceId],
+            'meta' => [
+                'instance_id'    => $resolvedInstanceId,
+                'instance_token' => $request->attributes->get('instanceToken'),
+            ],
         ]);
     }
 
@@ -360,6 +382,85 @@ class FormController extends Controller
             'description' => '',
             'is_active'   => true,
         ]);
+    }
+
+    /**
+     * Decode the raw token from the request and return the full payload array.
+     * Used for debugging plan detection and exposing decoded claims to the client.
+     */
+    private function resolveTokenPayloadFromAuth(Request $request): ?array
+    {
+        $auth = $this->resolveAuthHeader($request);
+        if (! $auth) {
+            return null;
+        }
+
+        $token = AuthHelper::extractTokenFromAuthHeader($auth);
+        if (! $token) {
+            return null;
+        }
+
+        $parts = explode('.', $token);
+
+        // Classic Wix instance token: sig.payload (2 parts)
+        if (count($parts) === 2) {
+            $decoded = json_decode(
+                base64_decode(strtr($parts[1], '-_', '+/')),
+                true,
+            );
+            if (is_array($decoded)) {
+                return $decoded;
+            }
+        }
+
+        // Standard JWT: header.payload.signature (3+ parts)
+        if (count($parts) >= 3) {
+            // Try each middle segment (some Wix tokens have non-standard part counts)
+            foreach (range(1, min(4, count($parts) - 1)) as $idx) {
+                if (! isset($parts[$idx])) {
+                    continue;
+                }
+                $decoded = json_decode(
+                    base64_decode(strtr($parts[$idx], '-_', '+/')),
+                    true,
+                );
+                if (is_array($decoded)) {
+                    return $decoded;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Extract the vendorProductId directly from the raw token payload.
+     * Needed when this route is not behind WixInstanceAuth middleware.
+     */
+    private function extractVendorProductIdFromAuth(Request $request): ?string
+    {
+        $payload = $this->resolveTokenPayloadFromAuth($request);
+        if (! $payload) {
+            return null;
+        }
+
+        $id = $payload['vendorProductId'] ?? $payload['vendor_product_id'] ?? null;
+        if ($id !== null && $id !== '') {
+            return (string) $id;
+        }
+
+        $data = $payload['data'] ?? null;
+        if (is_string($data)) {
+            $data = json_decode($data, true);
+        }
+        if (is_array($data)) {
+            $id = $data['vendorProductId'] ?? $data['vendor_product_id'] ?? null;
+            if ($id !== null && $id !== '') {
+                return (string) $id;
+            }
+        }
+
+        return null;
     }
 
     private function seedDefaultFields(Form $form): void
