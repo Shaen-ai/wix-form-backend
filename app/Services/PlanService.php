@@ -7,10 +7,10 @@ use App\Models\Form;
 class PlanService
 {
     private const PLAN_LIMITS = [
-        'free'         => ['max_total_file_size_mb' => 200,  'monthly_submissions' => 100,   'show_branding' => true],
-        'light'        => ['max_total_file_size_mb' => 1024, 'monthly_submissions' => 1000,  'show_branding' => false],
-        'business'     => ['max_total_file_size_mb' => 5120, 'monthly_submissions' => 10000, 'show_branding' => false],
-        'business_pro' => ['max_total_file_size_mb' => 0,    'monthly_submissions' => 0,     'show_branding' => false],
+        'free'         => ['max_total_file_size_mb' => 200,   'monthly_submissions' => 100,  'max_fields_per_form' => 10,  'show_branding' => true],
+        'light'        => ['max_total_file_size_mb' => 1024,  'monthly_submissions' => 1000, 'max_fields_per_form' => 100, 'show_branding' => false],
+        'business'     => ['max_total_file_size_mb' => 3072,  'monthly_submissions' => 0,    'max_fields_per_form' => 0,   'show_branding' => false],
+        'business_pro' => ['max_total_file_size_mb' => 10240, 'monthly_submissions' => 0,    'max_fields_per_form' => 0,   'show_branding' => false],
     ];
 
     public function isPaid(Form $form): bool
@@ -32,6 +32,12 @@ class PlanService
     public function monthlySubmissionLimit(Form $form): int
     {
         return $this->getLimits($form)['monthly_submissions'];
+    }
+
+    /** Returns 0 to indicate unlimited fields. */
+    public function maxFieldsPerForm(Form $form): int
+    {
+        return $this->getLimits($form)['max_fields_per_form'];
     }
 
     public function showBranding(Form $form): bool

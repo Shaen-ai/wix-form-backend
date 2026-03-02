@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Models\Form;
 use App\Models\FormField;
+use App\Services\PlanService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -13,6 +14,7 @@ use Illuminate\Support\Facades\Log;
 
 class FormFieldController extends Controller
 {
+    public function __construct(private readonly PlanService $planService) {}
     private const VALID_FIELD_TYPES = [
         'text', 'textarea', 'email', 'phone', 'number', 'url',
         'date', 'time', 'datetime', 'select', 'multi_select',
@@ -454,6 +456,13 @@ PROMPT;
             'fields.*.page_index' => 'nullable|integer|min:0',
         ]);
         $fieldsData = $validated['fields'];
+
+        $maxFields = $this->planService->maxFieldsPerForm($form);
+        if ($maxFields > 0 && count($fieldsData) > $maxFields) {
+            return response()->json([
+                'message' => "Your plan allows a maximum of {$maxFields} fields per form. Please upgrade to add more fields.",
+            ], 422);
+        }
 
         $fields = DB::transaction(function () use ($form, $fieldsData) {
             $incomingIds = collect($fieldsData)->pluck('id')->filter()->all();
