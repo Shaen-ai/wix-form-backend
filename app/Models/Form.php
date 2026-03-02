@@ -13,17 +13,10 @@ class Form extends Model
         'settings_json', 'is_active', 'language', 'plan',
     ];
 
-    protected $appends = ['premium_plan'];
-
     protected $casts = [
         'settings_json' => 'array',
         'is_active' => 'boolean',
     ];
-
-    public function getPremiumPlanAttribute(): string
-    {
-        return $this->plan ?? 'basic';
-    }
 
     public function formFields(): HasMany
     {

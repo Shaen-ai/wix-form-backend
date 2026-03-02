@@ -32,6 +32,8 @@ class FormController extends Controller
         if ($instanceId && $compId) {
             $form = $this->resolveForm($instanceId, $compId);
 
+            $this->syncPlanFromRequest($form, $request);
+
             if ($form->formFields()->count() === 0) {
                 $this->seedDefaultFields($form);
             }
