@@ -87,7 +87,7 @@ class FormController extends Controller
 
             $form->load('formFields');
 
-            return response()->json(['data' => $form]);
+            return response()->json(['data' => $this->formWithRecaptchaKey($form)]);
         }
 
         $form = Form::where('comp_id', $compId)
@@ -108,7 +108,24 @@ class FormController extends Controller
             $form->load('formFields');
         }
 
-        return response()->json(['data' => $form]);
+        return response()->json(['data' => $this->formWithRecaptchaKey($form)]);
+    }
+
+    private function formWithRecaptchaKey(Form $form): array
+    {
+        $data = $form->toArray();
+        $formSettings = $form->settings_json ?? [];
+        $recaptchaEnabled = array_key_exists('recaptchaEnabled', $formSettings)
+            ? ($formSettings['recaptchaEnabled'] === true)
+            : ($form->settings?->recaptcha_enabled ?? false);
+        if ($recaptchaEnabled) {
+            $siteKey = config('services.recaptcha.site_key');
+            if ($siteKey) {
+                $data['recaptcha_site_key'] = $siteKey;
+            }
+        }
+
+        return $data;
     }
 
     /**
