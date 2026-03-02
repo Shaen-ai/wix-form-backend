@@ -55,7 +55,17 @@
                                         {{ $row['label'] }}
                                     </td>
                                     <td style="background-color:{{ $bg }};padding:14px 16px;font-size:14px;color:#374151;line-height:1.5;border-bottom:1px solid #f3f4f6;">
-                                        @if($row['type'] === 'email')
+                                        @if($row['type'] === 'file_upload')
+                                            @foreach($row['fileEntries'] ?? [] as $entry)
+                                                <div style="margin-bottom:4px;">
+                                                    @if($entry['attached'])
+                                                        <span style="color:#059669;">{{ $entry['name'] }}</span> <span style="color:#6b7280;font-size:12px;">(attached)</span>
+                                                    @else
+                                                        <a href="{{ $entry['downloadUrl'] }}" style="color:#2563eb;text-decoration:underline;" target="_blank">{{ $entry['name'] }}</a> <span style="color:#6b7280;font-size:12px;">(download link, expires in 7 days)</span>
+                                                    @endif
+                                                </div>
+                                            @endforeach
+                                        @elseif($row['type'] === 'email')
                                             <a href="mailto:{{ $row['value'] }}" style="color:#374151;text-decoration:underline;">{{ $row['value'] }}</a>
                                         @elseif($row['type'] === 'url')
                                             <a href="{{ $row['value'] }}" style="color:#374151;text-decoration:underline;" target="_blank">{{ $row['value'] }}</a>

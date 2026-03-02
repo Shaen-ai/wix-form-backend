@@ -44,6 +44,11 @@ Route::prefix('v1')->group(function () {
         Route::get('/files/{id}/download', [FileController::class, 'download']);
     });
 
+    // Public signed download for admin notification emails (no Wix auth)
+    Route::get('/files/{id}/download-public', [FileController::class, 'downloadPublic'])
+        ->middleware('signed')
+        ->name('files.download-public');
+
     Route::post('/forms/{compId}/submit', [SubmitController::class, 'submit'])
         ->middleware('throttle:60,1');
     Route::get('/forms/{compId}/submissions/{submissionId}', [SubmitController::class, 'getSubmissionForEdit']);

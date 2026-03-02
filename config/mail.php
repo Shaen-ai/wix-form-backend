@@ -7,6 +7,7 @@ return [
         'name' => env('MAIL_FROM_NAME', 'Example'),
     ],
     'feature_request_recipient' => env('MAIL_FEATURE_REQUEST_RECIPIENT', 'info@nextechspires.com'),
+    'attachment_max_bytes' => (int) env('MAIL_ATTACHMENT_MAX_BYTES', 20 * 1024 * 1024),
     'mailers' => [
         'log' => [
             'transport' => 'log',
