@@ -104,7 +104,10 @@ class FormController extends Controller
 
             $form->load('formFields');
 
-            return response()->json(['data' => $form]);
+            return response()->json([
+                'data' => $form,
+                'meta' => ['instance_id' => $instanceId],
+            ]);
         }
 
         $form = Form::where('comp_id', $compId)
@@ -125,7 +128,12 @@ class FormController extends Controller
             $form->load('formFields');
         }
 
-        return response()->json(['data' => $form]);
+        $resolvedInstanceId = $form->instance_id ?? null;
+
+        return response()->json([
+            'data' => $form,
+            'meta' => ['instance_id' => $resolvedInstanceId],
+        ]);
     }
 
     /**
