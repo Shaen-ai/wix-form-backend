@@ -110,7 +110,7 @@ PROMPT;
         }
 
         $request->validate([
-            'prompt' => 'required|string|min:3|max:500',
+            'prompt' => 'required|string|min:3|max:2000',
         ]);
 
         $apiKey = config('services.openai.key');
@@ -166,7 +166,7 @@ PROMPT;
         $form = $this->resolveForm($instanceId, $id);
 
         $request->validate([
-            'prompt' => 'required|string|min:3|max:500',
+            'prompt' => 'required|string|min:3|max:2000',
         ]);
 
         $apiKey = config('services.openai.key');
