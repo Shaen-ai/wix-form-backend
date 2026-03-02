@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Models\Form;
 use App\Models\Submission;
+use App\Services\PlanService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -22,6 +23,18 @@ class SubmissionController extends Controller
             ->with('submissionFiles')
             ->orderBy('submitted_at', 'desc')
             ->paginate($perPage);
+
+        $overLimitSet = $this->getOverLimitIdSet($form);
+
+        $submissions->getCollection()->transform(function (Submission $sub) use ($overLimitSet) {
+            if (isset($overLimitSet[$sub->id])) {
+                $sub->data_json = array_fill_keys(array_keys($sub->data_json ?? []), '*******');
+                $sub->is_over_limit = true;
+            } else {
+                $sub->is_over_limit = false;
+            }
+            return $sub;
+        });
 
         return response()->json($submissions);
     }
@@ -112,6 +125,8 @@ class SubmissionController extends Controller
             ->orderBy('submitted_at', 'desc')
             ->get();
 
+        $overLimitSet = $this->getOverLimitIdSet($form);
+
         $keys = ['id', 'submitted_at'];
         foreach ($submissions as $s) {
             foreach (array_keys($s->data_json ?? []) as $k) {
@@ -121,10 +136,11 @@ class SubmissionController extends Controller
             }
         }
 
-        return response()->streamDownload(function () use ($submissions, $keys) {
+        return response()->streamDownload(function () use ($submissions, $keys, $overLimitSet) {
             $out = fopen('php://output', 'w');
             fputcsv($out, $keys);
             foreach ($submissions as $s) {
+                $isOverLimit = isset($overLimitSet[$s->id]);
                 $row = [];
                 foreach ($keys as $col) {
                     if ($col === 'id') {
@@ -132,8 +148,12 @@ class SubmissionController extends Controller
                     } elseif ($col === 'submitted_at') {
                         $row[] = $s->submitted_at?->toIso8601String() ?? '';
                     } else {
-                        $val = ($s->data_json ?? [])[$col] ?? null;
-                        $row[] = is_array($val) || is_object($val) ? json_encode($val) : (string) $val;
+                        if ($isOverLimit) {
+                            $row[] = '*******';
+                        } else {
+                            $val = ($s->data_json ?? [])[$col] ?? null;
+                            $row[] = is_array($val) || is_object($val) ? json_encode($val) : (string) $val;
+                        }
                     }
                 }
                 fputcsv($out, $row);
@@ -142,6 +162,37 @@ class SubmissionController extends Controller
         }, "submissions-{$id}.csv", [
             'Content-Type' => 'text/csv',
         ]);
+    }
+
+    /**
+     * Returns a set (array keyed by submission ID) of submission IDs that exceed
+     * the plan's monthly limit for the current month.
+     * The oldest `limit` submissions of the current month are considered "within limit";
+     * any beyond that are over-limit and should have their data masked.
+     */
+    private function getOverLimitIdSet(Form $form): array
+    {
+        $planService = app(PlanService::class);
+        $monthlyLimit = $planService->monthlySubmissionLimit($form);
+
+        if ($monthlyLimit === 0) {
+            return [];
+        }
+
+        $thisMonthIds = Submission::where('form_id', $form->id)
+            ->whereYear('submitted_at', now()->year)
+            ->whereMonth('submitted_at', now()->month)
+            ->orderBy('submitted_at', 'asc')
+            ->pluck('id')
+            ->all();
+
+        if (count($thisMonthIds) <= $monthlyLimit) {
+            return [];
+        }
+
+        $overLimitIds = array_slice($thisMonthIds, $monthlyLimit);
+
+        return array_flip($overLimitIds);
     }
 
     private function resolveForm(?string $instanceId, int $id): Form

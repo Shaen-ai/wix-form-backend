@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\Form;
+use App\Services\PlanService;
 use App\Services\WixTokenInfoService;
 use App\Support\AuthHelper;
 use Firebase\JWT\JWT;
@@ -14,6 +15,8 @@ use Illuminate\Support\Facades\Log;
 
 class FormController extends Controller
 {
+    public function __construct(private readonly PlanService $planService) {}
+
     /**
      * GET /forms — list forms for the authenticated instance,
      * or read-only lookup by comp_id when unauthenticated.
@@ -268,6 +271,7 @@ class FormController extends Controller
         }
 
         $form = $this->resolveForm($instanceId, $compId);
+        $this->syncPlanFromRequest($form, $request);
 
         if ($form->formFields()->count() === 0) {
             $this->seedDefaultFields($form);
@@ -291,6 +295,8 @@ class FormController extends Controller
             $form->instance_id = $instanceId;
         }
 
+        $this->syncPlanFromRequest($form, $request);
+
         $validated = $request->validate([
             'name' => 'sometimes|string|max:255',
             'description' => 'nullable|string|max:2000',
@@ -302,6 +308,24 @@ class FormController extends Controller
         $form->fill($validated)->save();
 
         return response()->json($form);
+    }
+
+    /**
+     * Sync form->plan from the vendorProductId in the Wix instance token.
+     * Only writes to DB when the plan actually changed.
+     */
+    private function syncPlanFromRequest(Form $form, Request $request): void
+    {
+        $vendorProductId = $request->attributes->get('vendorProductId');
+        $plan = $this->planService->planFromVendorProductId($vendorProductId);
+        if ($form->plan !== $plan) {
+            $form->update(['plan' => $plan]);
+            Log::debug('[FormController] Synced plan from token', [
+                'form_id'           => $form->id,
+                'vendorProductId'   => $vendorProductId,
+                'plan'              => $plan,
+            ]);
+        }
     }
 
     /**

@@ -39,6 +39,11 @@ class WixInstanceAuth
             $request->attributes->set('instanceId', $tokenInfo['instanceId']);
             $request->attributes->set('wixSiteId', $tokenInfo['wixSiteId']);
 
+            // Decode the raw token payload to extract vendorProductId (not returned by Token Info API)
+            $rawPayload = $this->tryDecodePayloadWithoutVerification($token);
+            $vendorProductId = $rawPayload ? $this->extractVendorProductId($rawPayload) : null;
+            $request->attributes->set('vendorProductId', $vendorProductId);
+
             return $next($request);
         }
 
@@ -79,6 +84,7 @@ class WixInstanceAuth
 
         $request->attributes->set('instanceId', $instanceId);
         $request->attributes->set('wixSiteId', $wixSiteId);
+        $request->attributes->set('vendorProductId', $this->extractVendorProductId($payload));
 
         return $next($request);
     }
@@ -304,6 +310,33 @@ class WixInstanceAuth
 
         if (isset($payload['sub']) && is_string($payload['sub']) && $payload['sub'] !== '') {
             return $payload['sub'];
+        }
+
+        return null;
+    }
+
+    /**
+     * Extract vendorProductId from a decoded token payload.
+     * This field is set by Wix to the premium plan slug when a paid plan is active,
+     * and is null/absent on the free plan.
+     * Handles both flat payloads and nested `data` objects (classic instance token format).
+     */
+    private function extractVendorProductId(array $payload): ?string
+    {
+        $id = $payload['vendorProductId'] ?? $payload['vendor_product_id'] ?? null;
+        if ($id !== null && $id !== '') {
+            return (string) $id;
+        }
+
+        $data = $payload['data'] ?? null;
+        if (is_string($data)) {
+            $data = json_decode($data, true);
+        }
+        if (is_array($data)) {
+            $id = $data['vendorProductId'] ?? $data['vendor_product_id'] ?? null;
+            if ($id !== null && $id !== '') {
+                return (string) $id;
+            }
         }
 
         return null;
