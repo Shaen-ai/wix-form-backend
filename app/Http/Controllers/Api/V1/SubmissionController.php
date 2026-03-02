@@ -19,6 +19,7 @@ class SubmissionController extends Controller
         $perPage = min((int) $request->query('per_page', 25), 100);
 
         $submissions = Submission::where('form_id', $form->id)
+            ->with('submissionFiles')
             ->orderBy('submitted_at', 'desc')
             ->paginate($perPage);
 
