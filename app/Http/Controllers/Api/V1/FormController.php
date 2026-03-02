@@ -23,8 +23,8 @@ class FormController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $instanceId = $request->attributes->get('instanceId')
-            ?? $this->resolveInstanceIdFromAuth($request);
+        $tokenInfo  = $this->resolveTokenInfoFromRequest($request);
+        $instanceId = $tokenInfo['instanceId'];
 
         $compId = $request->query('compId')
             ?? $request->query('widgetInstanceId');
@@ -92,18 +92,17 @@ class FormController extends Controller
             return response()->json(['message' => 'X-Wix-Comp-Id header is required'], 422);
         }
 
-        $instanceId = $request->attributes->get('instanceId')
-            ?? $this->resolveInstanceIdFromAuth($request);
+        // Single call: resolves instanceId, vendorProductId, and the raw Token Info payload.
+        // Result is cached in request attributes so nothing is called twice.
+        $tokenInfo  = $this->resolveTokenInfoFromRequest($request);
+        $instanceId = $tokenInfo['instanceId'] ?? null;
 
         if ($instanceId) {
             $form = $this->resolveForm($instanceId, $compId);
 
-            // Sync plan from token — vendorProductId may be in middleware attributes
-            // or must be extracted directly (this route is not behind WixInstanceAuth).
-            $vendorProductId = $request->attributes->get('vendorProductId')
-                ?? $this->extractVendorProductIdFromAuth($request);
+            $vendorProductId = $tokenInfo['vendorProductId'] ?? null;
+            $plan            = $this->planService->planFromVendorProductId($vendorProductId);
 
-            $plan = $this->planService->planFromVendorProductId($vendorProductId);
             if ($form->plan !== $plan) {
                 $form->update(['plan' => $plan]);
                 Log::debug('[FormController] showByWidget: synced plan', [
@@ -123,8 +122,8 @@ class FormController extends Controller
                 'data' => $form,
                 'meta' => [
                     'instance_id'      => $instanceId,
-                    'instance_token'   => $request->attributes->get('instanceToken'),
-                    'decoded_instance' => $this->resolveTokenPayloadFromAuth($request),
+                    'instance_token'   => $tokenInfo['instanceToken'] ?? null,
+                    'decoded_instance' => $tokenInfo['raw'] ?? null,
                 ],
             ]);
         }
@@ -189,95 +188,92 @@ class FormController extends Controller
     }
 
     /**
-     * Try to resolve instance ID from Authorization header inline.
-     * Uses the same multi-strategy approach as WixInstanceAuth middleware:
-     * 1. Wix Token Info API (validates Wix OAuth tokens)
-     * 2. Local JWT decode with app secret
-     * 3. Decode payload without verification (Wix SDK tokens)
+     * Resolve the full token info for this request in one step.
+     *
+     * Strategy:
+     *   1. Return cached attributes set by WixInstanceAuth middleware (when present).
+     *   2. POST the raw token to https://www.wixapis.com/oauth2/token-info (Wix OAuth tokens).
+     *   3. Fall back to local JWT decode for dev/legacy tokens signed with our own secret.
+     *
+     * Result is cached in request attributes so subsequent calls within the same
+     * request pay zero extra cost.
+     *
+     * @return array{instanceId: ?string, vendorProductId: ?string, instanceToken: ?string, raw: array}
      */
-    private function resolveInstanceIdFromAuth(Request $request): ?string
+    private function resolveTokenInfoFromRequest(Request $request): array
     {
-        $auth = $this->resolveAuthHeader($request);
+        // Already resolved by WixInstanceAuth middleware — just repackage.
+        if ($request->attributes->has('instanceId')) {
+            return [
+                'instanceId'      => $request->attributes->get('instanceId'),
+                'vendorProductId' => $request->attributes->get('vendorProductId'),
+                'instanceToken'   => $request->attributes->get('instanceToken'),
+                'raw'             => $request->attributes->get('tokenInfoRaw', []),
+            ];
+        }
 
+        $empty = ['instanceId' => null, 'vendorProductId' => null, 'instanceToken' => null, 'raw' => []];
+
+        $auth = $this->resolveAuthHeader($request);
         if (! $auth) {
-            return null;
+            return $empty;
         }
 
         $token = AuthHelper::extractTokenFromAuthHeader($auth);
         if (! $token) {
-            return null;
+            return $empty;
         }
 
-        // Primary: Wix Token Info API (validates Wix OAuth/instance tokens)
+        // ── Strategy 1: Wix Token Info API ──────────────────────────────────────
+        // Handles all Wix OAuth / instance tokens (the authoritative source).
         $tokenInfo = app(WixTokenInfoService::class)->getTokenInfo($token);
         if ($tokenInfo) {
-            return $tokenInfo['instanceId'];
+            $result = [
+                'instanceId'      => $tokenInfo['instanceId'],
+                'vendorProductId' => $tokenInfo['vendorProductId'],
+                'instanceToken'   => $token,
+                'raw'             => $tokenInfo['raw'],
+            ];
+            $request->attributes->set('instanceId',      $result['instanceId']);
+            $request->attributes->set('vendorProductId', $result['vendorProductId']);
+            $request->attributes->set('instanceToken',   $result['instanceToken']);
+            $request->attributes->set('tokenInfoRaw',    $result['raw']);
+            return $result;
         }
 
-        // Fallback: local decode strategies
-        $key = config('app.jwt_secret');
-        $payload = null;
-
-        if ($key) {
-            try {
-                $payload = (array) JWT::decode($token, new Key($key, 'HS256'));
-            } catch (\Throwable $e) {
-                Log::debug('[FormController] HS256 decode failed, trying fallback', [
-                    'error' => $e->getMessage(),
-                ]);
-            }
+        // ── Strategy 2: local decode (dev tokens / classic Wix instance tokens) ─
+        $payload = $this->decodeTokenPayloadLocally($token);
+        if (! $payload) {
+            return $empty;
         }
 
-        if ($payload === null) {
-            $parts = explode('.', $token);
-            if (isset($parts[1])) {
-                $decoded = json_decode(
-                    base64_decode(strtr($parts[1], '-_', '+/')),
-                    true,
-                );
-                if (is_array($decoded)) {
-                    $payload = $decoded;
-                }
-            }
-        }
-
-        if (! is_array($payload)) {
-            return null;
-        }
-
-        $id = $payload['instanceId']
-            ?? $payload['wixInstanceId']
-            ?? $payload['instance_id']
-            ?? null;
-
-        if ($id) {
-            return (string) $id;
-        }
-
-        $data = $payload['data'] ?? null;
+        $instanceId = $payload['instanceId'] ?? $payload['wixInstanceId'] ?? $payload['instance_id'] ?? null;
+        $data       = $payload['data'] ?? null;
         if (is_string($data)) {
             $data = json_decode($data, true);
         }
-        if (is_array($data)) {
-            $id = $data['instanceId'] ?? $data['wixInstanceId'] ?? $data['instance_id'] ?? null;
-            if ($id) {
-                return (string) $id;
-            }
+        if (! $instanceId && is_array($data)) {
+            $instanceId = $data['instanceId'] ?? $data['wixInstanceId'] ?? $data['instance_id'] ?? null;
+        }
+        if (! $instanceId && isset($payload['sub']) && $payload['sub'] !== '') {
+            $instanceId = $payload['sub'];
         }
 
-        $context = $payload['context'] ?? null;
-        if (is_array($context)) {
-            $id = $context['instanceId'] ?? $context['appInstanceId'] ?? $context['wixInstanceId'] ?? null;
-            if ($id) {
-                return (string) $id;
-            }
+        $vendorProductId = $payload['vendorProductId'] ?? $payload['vendor_product_id'] ?? null;
+        if (! $vendorProductId && is_array($data)) {
+            $vendorProductId = $data['vendorProductId'] ?? $data['vendor_product_id'] ?? null;
         }
 
-        if (isset($payload['sub']) && is_string($payload['sub']) && $payload['sub'] !== '') {
-            return $payload['sub'];
-        }
-
-        return null;
+        $result = [
+            'instanceId'      => $instanceId ? (string) $instanceId : null,
+            'vendorProductId' => $vendorProductId ? (string) $vendorProductId : null,
+            'instanceToken'   => $token,
+            'raw'             => $payload,
+        ];
+        $request->attributes->set('instanceId',      $result['instanceId']);
+        $request->attributes->set('vendorProductId', $result['vendorProductId']);
+        $request->attributes->set('instanceToken',   $result['instanceToken']);
+        return $result;
     }
 
     /**
@@ -385,78 +381,45 @@ class FormController extends Controller
     }
 
     /**
-     * Decode the raw token from the request and return the full payload array.
-     * Used for debugging plan detection and exposing decoded claims to the client.
+     * Decode the JWT / classic Wix instance token payload locally (no signature verification).
+     * Returns the payload array on success, null if the token format is unrecognised
+     * or if the payload does not contain an instanceId claim (i.e. it's the JWT header).
      */
-    private function resolveTokenPayloadFromAuth(Request $request): ?array
+    private function decodeTokenPayloadLocally(string $token): ?array
     {
-        $auth = $this->resolveAuthHeader($request);
-        if (! $auth) {
-            return null;
-        }
-
-        $token = AuthHelper::extractTokenFromAuthHeader($auth);
-        if (! $token) {
-            return null;
-        }
-
+        $key   = config('app.jwt_secret');
         $parts = explode('.', $token);
 
-        // Classic Wix instance token: sig.payload (2 parts)
+        // Strategy 1: HS256 JWT with our own secret
+        if ($key && count($parts) === 3) {
+            try {
+                return (array) JWT::decode($token, new Key($key, 'HS256'));
+            } catch (\Throwable) {
+                // fall through
+            }
+        }
+
+        // Strategy 2: classic Wix instance token — sig.payload (2 parts)
         if (count($parts) === 2) {
-            $decoded = json_decode(
-                base64_decode(strtr($parts[1], '-_', '+/')),
-                true,
-            );
-            if (is_array($decoded)) {
+            $decoded = json_decode(base64_decode(strtr($parts[1], '-_', '+/')), true);
+            if (is_array($decoded) && isset($decoded['instanceId'])) {
                 return $decoded;
             }
         }
 
-        // Standard JWT: header.payload.signature (3+ parts)
+        // Strategy 3: standard/non-standard JWT — try each middle segment for a valid payload
         if (count($parts) >= 3) {
-            // Try each middle segment (some Wix tokens have non-standard part counts)
             foreach (range(1, min(4, count($parts) - 1)) as $idx) {
                 if (! isset($parts[$idx])) {
                     continue;
                 }
-                $decoded = json_decode(
-                    base64_decode(strtr($parts[$idx], '-_', '+/')),
-                    true,
-                );
-                if (is_array($decoded)) {
+                $decoded = json_decode(base64_decode(strtr($parts[$idx], '-_', '+/')), true);
+                // Only accept segments that look like a real payload (contain instanceId)
+                if (is_array($decoded) && (
+                    isset($decoded['instanceId']) || isset($decoded['wixInstanceId']) || isset($decoded['instance_id'])
+                )) {
                     return $decoded;
                 }
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * Extract the vendorProductId directly from the raw token payload.
-     * Needed when this route is not behind WixInstanceAuth middleware.
-     */
-    private function extractVendorProductIdFromAuth(Request $request): ?string
-    {
-        $payload = $this->resolveTokenPayloadFromAuth($request);
-        if (! $payload) {
-            return null;
-        }
-
-        $id = $payload['vendorProductId'] ?? $payload['vendor_product_id'] ?? null;
-        if ($id !== null && $id !== '') {
-            return (string) $id;
-        }
-
-        $data = $payload['data'] ?? null;
-        if (is_string($data)) {
-            $data = json_decode($data, true);
-        }
-        if (is_array($data)) {
-            $id = $data['vendorProductId'] ?? $data['vendor_product_id'] ?? null;
-            if ($id !== null && $id !== '') {
-                return (string) $id;
             }
         }
 

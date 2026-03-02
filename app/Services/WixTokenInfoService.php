@@ -10,10 +10,10 @@ class WixTokenInfoService
     private const TOKEN_INFO_URL = 'https://www.wixapis.com/oauth2/token-info';
 
     /**
-     * Validate the token with Wix Token Info API.
+     * Validate the token with Wix Token Info API and return all decoded fields.
      *
      * @param  string  $token  Raw token value (without "Bearer " prefix)
-     * @return array{instanceId: string, wixSiteId: ?string}|null
+     * @return array{instanceId: string, wixSiteId: ?string, vendorProductId: ?string, raw: array}|null
      */
     public function getTokenInfo(string $token): ?array
     {
@@ -33,20 +33,29 @@ class WixTokenInfoService
                 return null;
             }
 
-            $data = $response->json();
+            $data = $response->json() ?? [];
             $instanceId = $data['instanceId'] ?? $data['instance_id'] ?? null;
 
             if (! $instanceId) {
-                Log::debug('[WixTokenInfo] Response has no instanceId', ['keys' => array_keys($data ?? [])]);
+                Log::debug('[WixTokenInfo] Response has no instanceId', ['keys' => array_keys($data)]);
 
                 return null;
             }
 
-            $wixSiteId = $data['siteId'] ?? $data['wixSiteId'] ?? $data['site_id'] ?? null;
+            $wixSiteId       = $data['siteId'] ?? $data['wixSiteId'] ?? $data['site_id'] ?? null;
+            $vendorProductId = $data['vendorProductId'] ?? $data['vendor_product_id'] ?? null;
+
+            Log::debug('[WixTokenInfo] Token validated', [
+                'instanceId'      => $instanceId,
+                'vendorProductId' => $vendorProductId,
+                'keys'            => array_keys($data),
+            ]);
 
             return [
-                'instanceId'  => (string) $instanceId,
-                'wixSiteId'   => $wixSiteId ? (string) $wixSiteId : null,
+                'instanceId'      => (string) $instanceId,
+                'wixSiteId'       => $wixSiteId ? (string) $wixSiteId : null,
+                'vendorProductId' => $vendorProductId ? (string) $vendorProductId : null,
+                'raw'             => $data,
             ];
         } catch (\Throwable $e) {
             Log::warning('[WixTokenInfo] Request failed', [

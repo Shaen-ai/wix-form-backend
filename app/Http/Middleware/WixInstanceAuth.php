@@ -39,10 +39,14 @@ class WixInstanceAuth
             $request->attributes->set('instanceId', $tokenInfo['instanceId']);
             $request->attributes->set('wixSiteId', $tokenInfo['wixSiteId']);
             $request->attributes->set('instanceToken', $token);
+            $request->attributes->set('tokenInfoRaw', $tokenInfo['raw'] ?? []);
 
-            // Decode the raw token payload to extract vendorProductId (not returned by Token Info API)
-            $rawPayload = $this->tryDecodePayloadWithoutVerification($token);
-            $vendorProductId = $rawPayload ? $this->extractVendorProductId($rawPayload) : null;
+            // Prefer vendorProductId from Token Info API; fall back to raw JWT payload decode
+            $vendorProductId = $tokenInfo['vendorProductId'];
+            if (! $vendorProductId) {
+                $rawPayload      = $this->tryDecodePayloadWithoutVerification($token);
+                $vendorProductId = $rawPayload ? $this->extractVendorProductId($rawPayload) : null;
+            }
             $request->attributes->set('vendorProductId', $vendorProductId);
 
             return $next($request);
