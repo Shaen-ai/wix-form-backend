@@ -55,8 +55,10 @@ class SubmitController extends Controller
             }
         }
 
-        $settings = $form->settings;
-        if ($settings?->recaptcha_enabled) {
+        $recaptchaEnabled = array_key_exists('recaptchaEnabled', $formSettings)
+            ? ($formSettings['recaptchaEnabled'] === true)
+            : ($form->settings?->recaptcha_enabled ?? false);
+        if ($recaptchaEnabled) {
             $token = $validated['recaptcha_token'] ?? '';
             if (! $this->recaptcha->verify($token, $request->ip())) {
                 return response()->json(['message' => 'reCAPTCHA verification failed'], 422);
