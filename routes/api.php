@@ -33,7 +33,9 @@ Route::prefix('v1')->group(function () {
             ->middleware('throttle:10,1');
         Route::put('/forms/{id}/fields', [FormFieldController::class, 'update']);
         Route::get('/forms/{id}/submissions', [SubmissionController::class, 'index']);
+        Route::post('/forms/{id}/submissions', [SubmissionController::class, 'store']);
         Route::get('/forms/{id}/submissions/export.csv', [SubmissionController::class, 'exportCsv']);
+        Route::put('/forms/{id}/submissions/{submissionId}', [SubmissionController::class, 'update']);
 
         Route::get('/forms/{formId}/settings', [FormSettingsController::class, 'show']);
         Route::put('/forms/{formId}/settings', [FormSettingsController::class, 'update']);

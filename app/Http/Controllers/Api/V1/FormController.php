@@ -3,8 +3,9 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
-use App\Support\AuthHelper;
 use App\Models\Form;
+use App\Services\WixTokenInfoService;
+use App\Support\AuthHelper;
 use Firebase\JWT\JWT;
 use Firebase\JWT\Key;
 use Illuminate\Http\JsonResponse;
@@ -48,7 +49,20 @@ class FormController extends Controller
         $compId = $request->header('X-Wix-Comp-Id') ?? $compId;
 
         if (! $compId) {
-            return response()->json(['message' => 'Unauthorized'], 401);
+            $authPresent = (bool) $this->resolveAuthHeader($request);
+            Log::warning('[FormController] GET /forms 401: no instanceId and no compId', [
+                'auth_present' => $authPresent,
+                'hint'         => $authPresent
+                    ? 'Token may be invalid, expired, or Authorization header stripped by proxy. Try adding ?compId=... or ensure X-Wix-Comp-Id header.'
+                    : 'Provide Authorization header (or X-Authorization) and/or compId query param or X-Wix-Comp-Id header.',
+            ]);
+
+            return response()->json([
+                'message' => 'Unauthorized',
+                'hint'    => $authPresent
+                    ? 'Token validation failed. Ensure token is valid and not expired. Alternatively provide compId or X-Wix-Comp-Id.'
+                    : 'Provide Authorization (or X-Authorization) and/or compId.',
+            ], 401);
         }
 
         $form = Form::where('comp_id', $compId)
@@ -112,21 +126,45 @@ class FormController extends Controller
     }
 
     /**
-     * Try to resolve instance ID from Authorization header inline.
-     * Uses the same multi-strategy approach as WixInstanceAuth middleware.
+     * Resolve auth token from various headers (Authorization is often stripped by proxies).
      */
-    private function resolveInstanceIdFromAuth(Request $request): ?string
+    private function resolveAuthHeader(Request $request): ?string
     {
-        $auth = $request->header('Authorization');
+        $auth = $request->header('Authorization')
+            ?? $request->header('X-Authorization')
+            ?? $request->header('X-Instance-Token');
 
+        if (! $auth && isset($_SERVER['HTTP_AUTHORIZATION'])) {
+            $auth = $_SERVER['HTTP_AUTHORIZATION'];
+        }
+        if (! $auth && isset($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
+            $auth = $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
+        }
+        if (! $auth && isset($_SERVER['HTTP_X_AUTHORIZATION'])) {
+            $auth = $_SERVER['HTTP_X_AUTHORIZATION'];
+        }
         if (! $auth && function_exists('getallheaders')) {
             foreach (getallheaders() as $name => $value) {
-                if (strcasecmp($name, 'Authorization') === 0) {
+                if (in_array(strtolower($name), ['authorization', 'x-authorization', 'x-instance-token'], true)) {
                     $auth = $value;
                     break;
                 }
             }
         }
+
+        return $auth ?: null;
+    }
+
+    /**
+     * Try to resolve instance ID from Authorization header inline.
+     * Uses the same multi-strategy approach as WixInstanceAuth middleware:
+     * 1. Wix Token Info API (validates Wix OAuth tokens)
+     * 2. Local JWT decode with app secret
+     * 3. Decode payload without verification (Wix SDK tokens)
+     */
+    private function resolveInstanceIdFromAuth(Request $request): ?string
+    {
+        $auth = $this->resolveAuthHeader($request);
 
         if (! $auth) {
             return null;
@@ -136,8 +174,15 @@ class FormController extends Controller
         if (! $token) {
             return null;
         }
-        $key   = config('app.jwt_secret');
 
+        // Primary: Wix Token Info API (validates Wix OAuth/instance tokens)
+        $tokenInfo = app(WixTokenInfoService::class)->getTokenInfo($token);
+        if ($tokenInfo) {
+            return $tokenInfo['instanceId'];
+        }
+
+        // Fallback: local decode strategies
+        $key = config('app.jwt_secret');
         $payload = null;
 
         if ($key) {
@@ -182,6 +227,14 @@ class FormController extends Controller
         }
         if (is_array($data)) {
             $id = $data['instanceId'] ?? $data['wixInstanceId'] ?? $data['instance_id'] ?? null;
+            if ($id) {
+                return (string) $id;
+            }
+        }
+
+        $context = $payload['context'] ?? null;
+        if (is_array($context)) {
+            $id = $context['instanceId'] ?? $context['appInstanceId'] ?? $context['wixInstanceId'] ?? null;
             if ($id) {
                 return (string) $id;
             }

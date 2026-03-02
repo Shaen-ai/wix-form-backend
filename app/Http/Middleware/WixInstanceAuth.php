@@ -86,10 +86,13 @@ class WixInstanceAuth
     /**
      * Try every available source for the Authorization header.
      * Apache CGI/FastCGI and some reverse-proxy setups strip or rename it.
+     * X-Authorization and X-Instance-Token are fallbacks when proxies strip Authorization.
      */
     private function resolveAuthorizationHeader(Request $request): ?string
     {
-        $auth = $request->header('Authorization');
+        $auth = $request->header('Authorization')
+            ?? $request->header('X-Authorization')
+            ?? $request->header('X-Instance-Token');
 
         if (! $auth && isset($_SERVER['HTTP_AUTHORIZATION'])) {
             $auth = $_SERVER['HTTP_AUTHORIZATION'];
@@ -99,9 +102,13 @@ class WixInstanceAuth
             $auth = $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
         }
 
+        if (! $auth && isset($_SERVER['HTTP_X_AUTHORIZATION'])) {
+            $auth = $_SERVER['HTTP_X_AUTHORIZATION'];
+        }
+
         if (! $auth && function_exists('getallheaders')) {
             foreach (getallheaders() as $name => $value) {
-                if (strcasecmp($name, 'Authorization') === 0) {
+                if (in_array(strtolower($name), ['authorization', 'x-authorization', 'x-instance-token'], true)) {
                     $auth = $value;
                     break;
                 }
