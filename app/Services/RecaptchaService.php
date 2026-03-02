@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 class RecaptchaService
 {
@@ -16,6 +17,7 @@ class RecaptchaService
             return $this->verifyEnterprise($token, $expectedAction, $projectId, $apiKey, $siteKey);
         }
 
+        Log::info('reCAPTCHA using legacy siteverify (Enterprise project_id/api_key not set)');
         $secret = config('services.recaptcha.secret');
         if (empty($secret)) {
             if (app()->environment('production')) {
@@ -44,18 +46,30 @@ class RecaptchaService
         $response = Http::asJson()->post($url, $payload);
 
         if (! $response->successful()) {
+            Log::warning('reCAPTCHA Enterprise API error', [
+                'status' => $response->status(),
+                'body' => $response->json(),
+            ]);
             return false;
         }
 
         $body = $response->json();
         $tokenProperties = $body['tokenProperties'] ?? [];
-        if (($tokenProperties['valid'] ?? false) === false) {
+        $valid = $tokenProperties['valid'] ?? null;
+        if ($valid === false) {
+            Log::warning('reCAPTCHA token invalid', [
+                'invalidReason' => $tokenProperties['invalidReason'] ?? 'unknown',
+            ]);
             return false;
         }
         $riskAnalysis = $body['riskAnalysis'] ?? [];
         $score = $riskAnalysis['score'] ?? 0;
+        if ($score < 0.5) {
+            Log::info('reCAPTCHA score too low', ['score' => $score]);
+            return false;
+        }
 
-        return $score >= 0.5;
+        return true;
     }
 
     private function verifyLegacy(string $token, string $secret, ?string $ip): bool
@@ -67,6 +81,12 @@ class RecaptchaService
         ]);
 
         $body = $response->json();
-        return ($body['success'] ?? false) === true;
+        $success = ($body['success'] ?? false) === true;
+        if (! $success) {
+            Log::warning('reCAPTCHA legacy verify failed', [
+                'errorCodes' => $body['error-codes'] ?? [],
+            ]);
+        }
+        return $success;
     }
 }
