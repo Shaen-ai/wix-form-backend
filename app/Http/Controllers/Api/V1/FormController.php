@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\Form;
+use App\Models\FormSettings;
 use App\Services\PlanService;
 use App\Services\WixTokenInfoService;
 use App\Support\AuthHelper;
@@ -334,6 +335,15 @@ class FormController extends Controller
         ]);
 
         $form->fill($validated)->save();
+
+        if (array_key_exists('settings_json', $validated)
+            && is_array($validated['settings_json'])
+            && array_key_exists('userConfirmationEmail', $validated['settings_json'])) {
+            FormSettings::updateOrCreate(
+                ['form_id' => $form->id],
+                ['auto_reply_enabled' => (bool) $validated['settings_json']['userConfirmationEmail']]
+            );
+        }
 
         return response()->json($form);
     }

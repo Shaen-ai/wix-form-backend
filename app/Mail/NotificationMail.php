@@ -4,12 +4,12 @@ namespace App\Mail;
 
 use App\Models\Form;
 use App\Models\Submission;
-use App\Models\SubmissionFile;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 
@@ -37,14 +37,13 @@ class NotificationMail extends Mailable
         $this->submitterEmail = null;
 
         foreach ($fields as $fieldId => $field) {
-            if (! array_key_exists($fieldId, $data)) {
+            $value = $this->rawDataValueForField($data, $fieldId);
+            if ($value === self::MISSING) {
                 continue;
             }
 
-            $value = $data[$fieldId];
-
             if ($field->type === 'file_upload') {
-                $fileEntries = $this->buildFileEntries($value, $fieldId, $submission, $maxAttachmentBytes);
+                $fileEntries = $this->buildFileEntries($value, (int) $fieldId, $submission, $maxAttachmentBytes);
                 if (empty($fileEntries)) {
                     continue;
                 }
@@ -57,7 +56,7 @@ class NotificationMail extends Mailable
                 continue;
             }
 
-            $display = is_array($value) ? ($value['value'] ?? json_encode($value)) : (string) $value;
+            $display = $this->formatDisplayValue($value);
 
             if ($display === '' || $display === '[]') {
                 continue;
@@ -86,6 +85,47 @@ class NotificationMail extends Mailable
                 }
             }
         }
+
+        if ($this->rows === [] && $data !== []) {
+            Log::warning('Notification mail has no rows but submission data_json is non-empty', [
+                'form_id' => $form->id,
+                'submission_id' => $submission->id,
+                'data_keys' => array_keys($data),
+                'field_ids' => $fields->keys()->values()->all(),
+            ]);
+        }
+    }
+
+    private const MISSING = '_missing_8f3a';
+
+    /**
+     * @return mixed|self::MISSING
+     */
+    private function rawDataValueForField(array $data, int|string $fieldId): mixed
+    {
+        $candidates = [$fieldId, is_numeric($fieldId) ? (int) $fieldId : null, (string) $fieldId];
+        foreach ($candidates as $key) {
+            if ($key === null) {
+                continue;
+            }
+            if (array_key_exists($key, $data)) {
+                return $data[$key];
+            }
+        }
+
+        return self::MISSING;
+    }
+
+    private function formatDisplayValue(mixed $value): string
+    {
+        if (is_array($value)) {
+            return (string) ($value['value'] ?? json_encode($value));
+        }
+        if (is_bool($value)) {
+            return $value ? 'Yes' : 'No';
+        }
+
+        return (string) $value;
     }
 
     /**

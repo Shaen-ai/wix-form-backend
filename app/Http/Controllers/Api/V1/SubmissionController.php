@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Models\Form;
 use App\Models\Submission;
+use App\Support\SubmissionDataNormalizer;
 use App\Services\PlanService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -49,7 +50,8 @@ class SubmissionController extends Controller
         ]);
 
         $fields = $form->formFields()->get()->keyBy('id');
-        $data = $this->normalizeCompoundFields($validated['data'], $fields);
+        $data = SubmissionDataNormalizer::rekeyToFormFieldIds($validated['data'], $fields);
+        $data = $this->normalizeCompoundFields($data, $fields);
 
         $submission = Submission::create([
             'form_id' => $form->id,
@@ -75,7 +77,8 @@ class SubmissionController extends Controller
 
         $submission = Submission::where('form_id', $form->id)->findOrFail($submissionId);
         $fields = $form->formFields()->get()->keyBy('id');
-        $data = $this->normalizeCompoundFields($validated['data'], $fields);
+        $data = SubmissionDataNormalizer::rekeyToFormFieldIds($validated['data'], $fields);
+        $data = $this->normalizeCompoundFields($data, $fields);
 
         $submission->data_json = $data;
         $submission->save();

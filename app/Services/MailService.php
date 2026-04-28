@@ -37,9 +37,9 @@ class MailService
         $settings ??= FormSettings::find($form->id);
         $formSettings = $form->settings_json ?? [];
 
-        $enabled = isset($formSettings['userConfirmationEmail'])
+        $enabled = array_key_exists('userConfirmationEmail', $formSettings)
             ? (bool) $formSettings['userConfirmationEmail']
-            : (bool) $settings?->auto_reply_enabled;
+            : (bool) ($settings?->auto_reply_enabled ?? false);
 
         if (! $enabled) {
             return;

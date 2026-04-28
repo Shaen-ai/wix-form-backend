@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Support\AuthHelper;
+use App\Support\SubmissionDataNormalizer;
 use App\Models\Form;
 use App\Models\Submission;
 use App\Models\SubmissionFile;
@@ -56,6 +57,7 @@ class SubmitController extends Controller
         $fileIds = $validated['file_ids'] ?? [];
 
         $fields = $form->formFields()->get()->keyBy('id');
+        $data = SubmissionDataNormalizer::rekeyToFormFieldIds($data, $fields);
         $data = $this->normalizeCompoundFields($data, $fields);
 
         [$emailFieldId, $email] = $this->extractEmailAndFieldId($data, $fields);
@@ -226,7 +228,8 @@ class SubmitController extends Controller
         }
 
         $fields = $form->formFields()->get()->keyBy('id');
-        $data = $this->normalizeCompoundFields($validated['data'], $fields);
+        $data = SubmissionDataNormalizer::rekeyToFormFieldIds($validated['data'], $fields);
+        $data = $this->normalizeCompoundFields($data, $fields);
         $fileIds = $validated['file_ids'] ?? [];
 
         $submission->data_json = $data;
